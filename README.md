@@ -2,6 +2,8 @@
 
 Juego original de defensa de torres inspirado en el ritmo de los juegos de globos y oleadas. Está hecho con Godot 4 y no necesita recursos externos.
 
+La versión actual se ejecuta a **1920×1080**. En el duelo online los dos mapas se escalan de forma uniforme, manteniendo su proporción, y los dardos aparecen visualmente durante los ataques.
+
 ## Recursos incluidos
 
 - `assets/coral_bend_map.svg`: mapa jugable "Coral Bend".
