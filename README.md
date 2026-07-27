@@ -35,4 +35,4 @@ La opción **En línea 1 vs 1** permite conexión directa por IP usando ENet:
 2. El rival escribe la IP local o pública del anfitrión, el mismo puerto y pulsa **Unirse a sala**.
 3. Al conectarse, ambos entran en un duelo con mapas iguales pero independientes.
 
-Durante el duelo se ven los dos mapas: el tuyo y el del rival. Cada jugador compra torres, inicia oleadas y protege sus propias vidas; gana quien siga con vidas cuando el rival las pierde todas. Para jugar desde redes distintas, el anfitrión debe permitir ese puerto en el firewall/router.
+Durante el duelo la pantalla queda dividida verticalmente: tu mapa a la izquierda y el del rival a la derecha. Cada jugador compra torres y protege sus propias vidas; las oleadas se inician automáticamente y gana quien siga con vidas cuando el rival las pierde todas. La vista rival usa predicción de movimiento entre actualizaciones de red para conservar animación fluida con latencia. Para jugar desde redes distintas, el anfitrión debe permitir ese puerto en el firewall/router.
