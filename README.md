@@ -33,6 +33,6 @@ La opción **En línea 1 vs 1** permite conexión directa por IP usando ENet:
 
 1. El anfitrión escribe un puerto (por defecto `7777`) y pulsa **Crear sala**.
 2. El rival escribe la IP local o pública del anfitrión, el mismo puerto y pulsa **Unirse a sala**.
-3. Al conectarse, ambos entran en la partida y las oleadas y torres se sincronizan.
+3. Al conectarse, ambos entran en un duelo con mapas iguales pero independientes.
 
-Durante el duelo se muestran en pantalla **Tu frente** y **Frente rival**, con vidas, dinero y oleada de cada jugador. Para jugar desde redes distintas, el anfitrión debe permitir ese puerto en el firewall/router.
+Durante el duelo se ven los dos mapas: el tuyo y el del rival. Cada jugador compra torres, inicia oleadas y protege sus propias vidas; gana quien siga con vidas cuando el rival las pierde todas. Para jugar desde redes distintas, el anfitrión debe permitir ese puerto en el firewall/router.
