@@ -5,7 +5,7 @@
     <filter id="shadow"><feGaussianBlur stdDeviation="3"/></filter>
   </defs>
   <rect width="1280" height="720" fill="url(#sea)"/>
-  <path d="M232 0H1280V720H228 Q267 650 238 577 Q210 507 247 438 Q275 382 241 310 Q217 253 255 183 Q282 133 250 65Z" fill="url(#grass)"/>
+  <path d="M232 0H1280V720H228 Q267 650 238 577 Q210 507 247 438 Q275 382 241 310 Q217 253 255 183 Q282 133 250 65Z" fill="url(#grass)" stroke="#c8f0d5" stroke-width="7" stroke-linejoin="round"/>
   <path d="M257 170 H470 L530 310 H800 L870 500 H1120 L1280 610" fill="none" stroke="#8c5938" stroke-width="70" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M257 170 H470 L530 310 H800 L870 500 H1120 L1280 610" fill="none" stroke="#e2b16e" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M257 170 H470 L530 310 H800 L870 500 H1120 L1280 610" fill="none" stroke="#f0c781" stroke-width="38" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 10" opacity=".55"/>

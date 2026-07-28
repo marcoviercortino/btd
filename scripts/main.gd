@@ -17,8 +17,8 @@ const BOMBARDIER_TEXTURE = preload("res://assets/characters/bombardier.svg")
 const LIGHTNING_MAGE_TEXTURE = preload("res://assets/characters/lightning_mage.svg")
 const MYSTIC_ARCHER_TEXTURE = preload("res://assets/characters/mystic_archer.svg")
 const REEF_MEDIC_TEXTURE = preload("res://assets/characters/reef_medic.svg")
-const TIDE_CAPTAIN_TEXTURE = preload("res://assets/characters/tide_captain.svg")
 const BANANA_FARMER_TEXTURE = preload("res://assets/characters/banana_farmer.svg")
+const PIRATE_TEXTURE = preload("res://assets/characters/pirate.svg")
 const BOOMERANG_PROJECTILE_TEXTURE = preload("res://assets/projectiles/boomerang.svg")
 
 var path := PackedVector2Array([
@@ -31,10 +31,12 @@ var balloons: Array[Dictionary] = []
 var towers: Array[Dictionary] = []
 var projectiles: Array[Dictionary] = []
 var lightning_effects: Array[Dictionary] = []
+var sword_swipes: Array[Dictionary] = []
 var bananas: Array[Dictionary] = []
 var rival_bananas: Array[Dictionary] = []
 var banana_popup_position := Vector2.ZERO
 var banana_popup_time := 0.0
+var banana_popup_value := 0
 var money := 650
 var lives := 300
 var wave := 0
@@ -69,6 +71,7 @@ var net_sync_timer := 0.0
 var auto_wave_timer := 2.5
 var next_balloon_id := 1
 var next_projectile_id := 1
+var next_banana_id := 1
 var loadout_select := false
 var chosen_towers: Array[int] = []
 var loadout_ready := false
@@ -106,6 +109,14 @@ var active_map := 0
 var map_reveal_time := 0.0
 var map_resolution_label := ""
 var map_resolution_spin := 0.0
+var map_coin_time := 0.0
+var map_coin_spin := 0.0
+var map_coin_heads := true
+var map_coin_host_vote := 0
+var map_coin_join_vote := 0
+var map_roulette_time := 0.0
+var map_roulette_spin := 0.0
+var map_roulette_result := 0
 
 func _ready() -> void:
 	game_sound = GameSoundScript.new()
@@ -150,6 +161,7 @@ func _process(delta: float) -> void:
 	update_towers(gameplay_delta)
 	update_projectiles(gameplay_delta)
 	update_lightning_effects(gameplay_delta)
+	update_sword_swipes(gameplay_delta)
 	if online_mode:
 		net_sync_timer -= delta
 		if net_sync_timer <= 0.0:
@@ -321,6 +333,8 @@ func update_towers(delta: float) -> void:
 		if target_index >= 0:
 			if tower.type == 3:
 				cast_chain_lightning(tower.position, target_index)
+			elif tower.type == 7:
+				cast_pirate_sweep(tower.position, point_on_path(balloons[target_index].distance))
 			else:
 				var locked_target_position := point_on_path(balloons[target_index].distance)
 				var shot_direction: Vector2 = (locked_target_position - tower.position).normalized()
@@ -350,21 +364,28 @@ func update_banana_farms(delta: float) -> void:
 		if farm.type != 5:
 			continue
 		farm.banana_timer += delta
-		if farm.banana_timer >= 2.0:
+		if farm.banana_timer >= 8.0:
 			farm.banana_timer = 0.0
-			bananas.append({"position": farm.position + Vector2(rng.randf_range(-34, 34), rng.randf_range(-28, 28)), "value": 30, "time": 12.0})
+			bananas.append({"id": next_banana_id, "position": farm.position + Vector2(rng.randf_range(-34, 34), rng.randf_range(-28, 28)), "value": 30, "age": 0.0, "brown_stage": 0, "collecting": false})
+			next_banana_id += 1
 	if banana_popup_time > 0.0:
 		banana_popup_time -= delta
 	var cursor_on_map := Rect2(0, 270, 960, 540).has_point(cursor_position)
 	var cursor_map_position := (cursor_position - Vector2(0, 270)) / Vector2(0.75, 0.75)
 	for i in range(bananas.size() - 1, -1, -1):
-		bananas[i].time -= delta
+		bananas[i].age += delta
+		var brown_stage: int = 0
+		if bananas[i].age >= 5.0:
+			brown_stage = mini(3, int(floor((bananas[i].age - 5.0) / 3.0)) + 1)
+		bananas[i].brown_stage = brown_stage
+		bananas[i].value = 30 - brown_stage * 7
 		if cursor_on_map and bananas[i].position.distance_to(cursor_map_position) < 165.0:
+			bananas[i].collecting = true
 			bananas[i].position = bananas[i].position.move_toward(cursor_map_position, 430.0 * delta)
 			if bananas[i].position.distance_to(cursor_map_position) < 16.0:
 				collect_banana_index(i)
 				continue
-		if bananas[i].time <= 0.0:
+		if bananas[i].age >= 13.0:
 			bananas.remove_at(i)
 
 func cast_chain_lightning(origin: Vector2, first_target: int) -> void:
@@ -396,6 +417,20 @@ func update_lightning_effects(delta: float) -> void:
 		lightning_effects[i].time -= delta
 		if lightning_effects[i].time <= 0.0:
 			lightning_effects.remove_at(i)
+
+func cast_pirate_sweep(origin: Vector2, target_position: Vector2) -> void:
+	var facing: Vector2 = (target_position - origin).normalized()
+	for index in range(balloons.size() - 1, -1, -1):
+		var offset: Vector2 = point_on_path(balloons[index].distance) - origin
+		if offset.length() <= 90.0 and facing.dot(offset.normalized()) >= 0.0:
+			damage_balloon(index, 2)
+	sword_swipes.append({"position": origin, "angle": facing.angle(), "time": 0.32})
+
+func update_sword_swipes(delta: float) -> void:
+	for index in range(sword_swipes.size() - 1, -1, -1):
+		sword_swipes[index].time -= delta
+		if sword_swipes[index].time <= 0.0:
+			sword_swipes.remove_at(index)
 
 func update_projectiles(delta: float) -> void:
 	for i in range(projectiles.size() - 1, -1, -1):
@@ -429,11 +464,6 @@ func update_projectiles(delta: float) -> void:
 			if p.kind == 2:
 				for j in range(balloons.size() - 1, -1, -1):
 					if point_on_path(balloons[j].distance).distance_to(target_pos) <= 68.0:
-						damage_balloon(j, p.damage)
-			elif p.kind == 7:
-				for j in range(balloons.size() - 1, -1, -1):
-					if point_on_path(balloons[j].distance).distance_to(target_pos) <= 78.0:
-						balloons[j].distance = max(0.0, balloons[j].distance - 95.0)
 						damage_balloon(j, p.damage)
 			else:
 				damage_balloon(p.target, p.damage)
@@ -626,7 +656,38 @@ func place_tower_local(position: Vector2, tower_kind: int) -> void:
 		active_player = 2 if active_player == 1 else 1
 
 func can_place_tower(position: Vector2, tower_kind: int) -> bool:
-	return PLAY_RECT.has_point(position) and money >= TOWER_COSTS[tower_kind] and not too_close_to_path(position) and not too_close_to_tower(position)
+	return PLAY_RECT.has_point(position) and money >= TOWER_COSTS[tower_kind] and not too_close_to_path(position) and not too_close_to_tower(position) and can_build_on_active_map(position, tower_kind)
+
+func is_aquatic_tower(tower_kind: int) -> bool:
+	return tower_kind == 6
+
+func coral_shore_x(y: float) -> float:
+	var shore := PackedVector2Array([Vector2(232, 0), Vector2(250, 65), Vector2(255, 183), Vector2(217, 253), Vector2(241, 310), Vector2(275, 382), Vector2(247, 438), Vector2(210, 507), Vector2(238, 577), Vector2(267, 650), Vector2(228, 720)])
+	for index in range(shore.size() - 1):
+		if y >= shore[index].y and y <= shore[index + 1].y:
+			return lerpf(shore[index].x, shore[index + 1].x, inverse_lerp(shore[index].y, shore[index + 1].y, y))
+	return shore[shore.size() - 1].x
+
+func is_water_on_active_map(position: Vector2) -> bool:
+	if active_map == 0:
+		return position.x < coral_shore_x(position.y)
+	if active_map == 2:
+		return position.x < 120.0 or position.x > 1120.0
+	return false
+
+func can_build_on_active_map(position: Vector2, tower_kind: int) -> bool:
+	if is_water_on_active_map(position) and not is_aquatic_tower(tower_kind):
+		return false
+	if active_map != 3:
+		return true
+	# Ruinas Celestes: only the three bright cloud-islands are solid ground.
+	var cloud_a := Vector2(210, 220)
+	var cloud_b := Vector2(1035, 520)
+	var cloud_c := Vector2(560, 600)
+	var in_cloud_a := pow((position.x - cloud_a.x) / 145.0, 2.0) + pow((position.y - cloud_a.y) / 105.0, 2.0) <= 1.0
+	var in_cloud_b := pow((position.x - cloud_b.x) / 170.0, 2.0) + pow((position.y - cloud_b.y) / 115.0, 2.0) <= 1.0
+	var in_cloud_c := pow((position.x - cloud_c.x) / 145.0, 2.0) + pow((position.y - cloud_c.y) / 100.0, 2.0) <= 1.0
+	return in_cloud_a or in_cloud_b or in_cloud_c
 
 func collect_banana_at(position: Vector2) -> bool:
 	for i in range(bananas.size() - 1, -1, -1):
@@ -640,6 +701,7 @@ func collect_banana_index(index: int) -> void:
 		return
 	money += bananas[index].value
 	banana_popup_position = bananas[index].position
+	banana_popup_value = bananas[index].value
 	banana_popup_time = 0.85
 	bananas.remove_at(index)
 	game_sound.play_effect("click", -10.0)
@@ -768,7 +830,12 @@ func rpc_update_rival(remote_lives: int, remote_money: int, remote_beneficios: i
 	rival_balloons = remote_balloons
 	rival_projectiles = RemotePredictionScript.merge_projectiles(rival_projectiles, remote_projectiles_data)
 	rival_lightning_effects = remote_lightning
-	rival_bananas = remote_bananas_data
+	# Remote bananas never show the owner's magnet movement. They disappear
+	# the moment their owner starts collecting them.
+	rival_bananas = []
+	for remote_banana in remote_bananas_data:
+		if not remote_banana.get("collecting", false):
+			rival_bananas.append(remote_banana)
 	rival_defeated = remote_lost
 	if remote_lost and not game_over:
 		won = true
@@ -827,7 +894,6 @@ func _draw() -> void:
 	# A friendly map guardian makes the island feel inhabited.
 	draw_texture_rect(GUARDIAN_TEXTURE, Rect2(1130, 42, 70, 70), false)
 	draw_texture_rect(REEF_MEDIC_TEXTURE, Rect2(1040, 92, 62, 62), false)
-	draw_texture_rect(TIDE_CAPTAIN_TEXTURE, Rect2(360, 575, 62, 62), false)
 	if online_mode:
 		draw_duel_status()
 	for tower in towers:
@@ -837,6 +903,7 @@ func _draw() -> void:
 		draw_balloon(point_on_path(balloon.distance), balloon)
 	for projectile in projectiles:
 		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT), projectile.kind)
+	draw_sword_swipes(Vector2.ZERO, Vector2.ONE)
 	if wave_banner > 0.0:
 		draw_centered("OLEADA %d" % wave, Vector2(765, 75), 34, Color.WHITE)
 	if game_over or won:
@@ -1109,6 +1176,8 @@ func draw_duel_arena(origin: Vector2, arena_towers: Array, arena_balloons: Array
 		draw_balloon(point_on_path(balloon.distance), balloon)
 	for projectile in arena_projectiles:
 		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT), projectile.kind)
+	if arena_towers == towers:
+		draw_sword_swipes(origin, Vector2(0.75, 0.75))
 
 func draw_dart(position: Vector2, color: Color, direction: Vector2, kind := 0) -> void:
 	if kind == 1:
@@ -1120,6 +1189,16 @@ func draw_dart(position: Vector2, color: Color, direction: Vector2, kind := 0) -
 	draw_line(tail, tip, color, 2.5)
 	draw_circle(tip, 3.5, Color.WHITE)
 
+func draw_sword_swipes(origin: Vector2, scale: Vector2) -> void:
+	if sword_swipes.is_empty():
+		return
+	draw_set_transform(origin, 0.0, scale)
+	for swipe in sword_swipes:
+		var alpha: float = clampf(float(swipe.time) / 0.32, 0.0, 1.0)
+		draw_arc(swipe.position, 90.0, swipe.angle - PI * 0.5, swipe.angle + PI * 0.5, 22, Color(1.0, 0.88, 0.55, alpha), 8.0)
+		draw_arc(swipe.position, 76.0, swipe.angle - PI * 0.5, swipe.angle + PI * 0.5, 22, Color(1.0, 1.0, 1.0, alpha), 2.5)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
 func draw_bananas() -> void:
 	draw_banana_group(Vector2(0, 270), bananas)
 	# Local pickup text is only drawn on our own arena.
@@ -1128,7 +1207,7 @@ func draw_bananas() -> void:
 		var font := ThemeDB.fallback_font
 		var popup_alpha: float = clampf(banana_popup_time / 0.65, 0.0, 1.0)
 		var popup_position := banana_popup_position + Vector2(0, -42.0 * (1.0 - popup_alpha))
-		draw_string(font, popup_position, "+$30", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.88, 0.25, popup_alpha))
+		draw_string(font, popup_position, "+$%d" % banana_popup_value, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.88, 0.25, popup_alpha))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 func draw_rival_bananas() -> void:
@@ -1137,9 +1216,12 @@ func draw_rival_bananas() -> void:
 func draw_banana_group(origin: Vector2, banana_list: Array) -> void:
 	draw_set_transform(origin, 0.0, Vector2(0.75, 0.75))
 	for banana in banana_list:
-		draw_circle(banana.position, 14, Color("8d7130"))
-		draw_circle(banana.position + Vector2(0, -2), 12, Color("ffe164"))
-		draw_arc(banana.position, 9, 0.25, 2.75, 12, Color("fff3a0"), 3.0)
+		var stage: float = clampf(float(banana.get("brown_stage", 0)) / 3.0, 0.0, 1.0)
+		var peel_color := Color("ffe164").lerp(Color("76512c"), stage)
+		var shine_color := Color("fff3a0").lerp(Color("b0804c"), stage)
+		draw_circle(banana.position, 14, Color("5f4328").lerp(Color("3a2a21"), stage))
+		draw_circle(banana.position + Vector2(0, -2), 12, peel_color)
+		draw_arc(banana.position, 9, 0.25, 2.75, 12, shine_color, 3.0)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 func current_map_texture():
@@ -1162,6 +1244,8 @@ func open_map_select(is_online: bool) -> void:
 	map_ready = false
 	rival_map_ready = false
 	map_reveal_time = 0.0
+	map_coin_time = 0.0
+	map_roulette_time = 0.0
 	map_resolution_label = ""
 
 func map_card_rect(index: int) -> Rect2:
@@ -1205,7 +1289,10 @@ func handle_map_select_input(event: InputEvent) -> void:
 			else:
 				rpc_submit_map_vote.rpc_id(1, selected_map_vote)
 		else:
-			begin_map_reveal(selected_map_vote if selected_map_vote < MapCatalogScript.NAMES.size() else rng.randi_range(0, MapCatalogScript.NAMES.size() - 1), "MAPA ELEGIDO")
+			if selected_map_vote == MapCatalogScript.NAMES.size():
+				begin_map_roulette(rng.randi_range(0, MapCatalogScript.NAMES.size() - 1))
+			else:
+				begin_map_reveal(selected_map_vote, "MAPA ELEGIDO")
 		queue_redraw()
 
 @rpc("any_peer", "reliable")
@@ -1228,20 +1315,39 @@ func try_resolve_map_vote() -> void:
 	var resolution := "MAPA ELEGIDO"
 	if selected_map_vote == random_vote and rival_map_vote == random_vote:
 		result = rng.randi_range(0, random_vote - 1)
-		resolution = "RULETA DE MAPAS"
+		rpc_start_map_roulette.rpc(result)
+		return
 	elif selected_map_vote == random_vote:
 		result = rival_map_vote
 		resolution = "VOTO RIVAL"
 	elif rival_map_vote == random_vote:
 		resolution = "TU VOTO"
 	elif selected_map_vote != rival_map_vote:
-		result = selected_map_vote if rng.randi_range(0, 1) == 0 else rival_map_vote
-		resolution = "LANZAMIENTO DE MONEDA"
+		var heads := rng.randi_range(0, 1) == 0
+		rpc_start_map_coin_toss.rpc(selected_map_vote, rival_map_vote, heads)
+		return
 	rpc_begin_map_reveal.rpc(result, resolution)
 
 @rpc("any_peer", "call_local", "reliable")
 func rpc_begin_map_reveal(map_index: int, resolution: String) -> void:
 	begin_map_reveal(map_index, resolution)
+
+@rpc("any_peer", "call_local", "reliable")
+func rpc_start_map_coin_toss(host_vote: int, join_vote: int, heads: bool) -> void:
+	map_coin_host_vote = clampi(host_vote, 0, MapCatalogScript.NAMES.size() - 1)
+	map_coin_join_vote = clampi(join_vote, 0, MapCatalogScript.NAMES.size() - 1)
+	map_coin_heads = heads
+	map_coin_time = 2.35
+	map_coin_spin = 0.0
+
+@rpc("any_peer", "call_local", "reliable")
+func rpc_start_map_roulette(map_index: int) -> void:
+	begin_map_roulette(map_index)
+
+func begin_map_roulette(map_index: int) -> void:
+	map_roulette_result = clampi(map_index, 0, MapCatalogScript.NAMES.size() - 1)
+	map_roulette_time = 2.6
+	map_roulette_spin = 0.0
 
 func begin_map_reveal(map_index: int, resolution: String) -> void:
 	active_map = clampi(map_index, 0, MapCatalogScript.NAMES.size() - 1)
@@ -1251,6 +1357,19 @@ func begin_map_reveal(map_index: int, resolution: String) -> void:
 	map_resolution_spin = 0.0
 
 func update_map_selection(delta: float) -> void:
+	if map_coin_time > 0.0:
+		map_coin_time -= delta
+		map_coin_spin += delta
+		if map_coin_time <= 0.0:
+			var chosen_map := map_coin_host_vote if map_coin_heads else map_coin_join_vote
+			begin_map_reveal(chosen_map, "CARA · MAPA DEL ANFITRION" if map_coin_heads else "CRUZ · MAPA DEL JUGADOR UNIDO")
+		return
+	if map_roulette_time > 0.0:
+		map_roulette_time -= delta
+		map_roulette_spin += delta
+		if map_roulette_time <= 0.0:
+			begin_map_reveal(map_roulette_result, "RULETA DE MAPAS")
+		return
 	if map_reveal_time <= 0.0:
 		return
 	map_reveal_time -= delta
@@ -1261,6 +1380,12 @@ func update_map_selection(delta: float) -> void:
 
 func draw_map_select() -> void:
 	draw_rect(Rect2(0, 0, WIDTH, HEIGHT), Color("102536"))
+	if map_coin_time > 0.0:
+		draw_map_coin_toss()
+		return
+	if map_roulette_time > 0.0:
+		draw_map_roulette()
+		return
 	if map_reveal_time > 0.0:
 		draw_map_reveal()
 		return
@@ -1294,6 +1419,41 @@ func draw_map_reveal() -> void:
 	draw_texture_rect(current_map_texture(), rect, false)
 	draw_style_box(make_box(Color(0.03, 0.08, 0.13, 0.88), 14), Rect2(610, 810, 700, 105))
 	draw_centered(MapCatalogScript.NAMES[active_map], Vector2(960, 875), 42, Color.WHITE)
+
+func draw_map_coin_toss() -> void:
+	var landing := map_coin_time < 0.55
+	var face_is_heads := map_coin_heads if landing else sin(map_coin_spin * 19.0) >= 0.0
+	var width_scale := 1.0 if landing else maxf(0.14, absf(cos(map_coin_spin * 19.0)))
+	draw_centered("LANZAMIENTO DE MONEDA", Vector2(960, 150), 42, Color("f4d66d"))
+	draw_centered("Cara: mapa del anfitrión · Cruz: mapa del jugador unido", Vector2(960, 205), 20, Color("d9eef4"))
+	draw_set_transform(Vector2(960, 470), 0.0, Vector2(width_scale, 1.0))
+	draw_circle(Vector2.ZERO, 145.0, Color("f4c75d"))
+	draw_circle(Vector2.ZERO, 128.0, Color("d99235"))
+	draw_circle(Vector2.ZERO, 111.0, Color("f8d77a"))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if width_scale > 0.28:
+		draw_centered("CARA" if face_is_heads else "CRUZ", Vector2(960, 485), 35, Color("6a4523"))
+		draw_centered("ANFITRION" if face_is_heads else "UNIDO", Vector2(960, 525), 20, Color("6a4523"))
+	if landing:
+		draw_centered("%s · %s" % ["CARA" if map_coin_heads else "CRUZ", MapCatalogScript.NAMES[map_coin_host_vote if map_coin_heads else map_coin_join_vote]], Vector2(960, 720), 28, Color.WHITE)
+
+func draw_map_roulette() -> void:
+	var landing := map_roulette_time < 0.55
+	var display_index := map_roulette_result if landing else int(floor(map_roulette_spin * 11.0)) % MapCatalogScript.NAMES.size()
+	draw_centered("RULETA DE MAPAS", Vector2(960, 135), 44, Color("f4d66d"))
+	draw_centered("El mapa aleatorio decidirá el campo de batalla", Vector2(960, 190), 20, Color("d9eef4"))
+	for index in range(MapCatalogScript.NAMES.size()):
+		var angle := -PI * 0.5 + index * TAU / MapCatalogScript.NAMES.size()
+		var center := Vector2(960, 490) + Vector2(cos(angle), sin(angle)) * 225.0
+		var selected := index == display_index
+		draw_style_box(make_box(Color("486d91") if selected else Color("1d4055"), 13), Rect2(center - Vector2(150, 105), Vector2(300, 210)))
+		draw_texture_rect(MapCatalogScript.TEXTURES[index], Rect2(center - Vector2(135, 86), Vector2(270, 150)), false)
+		draw_centered(MapCatalogScript.NAMES[index], center + Vector2(0, 95), 18, Color("f4d66d") if selected else Color.WHITE)
+	draw_circle(Vector2(960, 490), 58, Color("f4c75d"))
+	draw_circle(Vector2(960, 490), 43, Color("d99235"))
+	draw_centered("▼", Vector2(960, 267), 32, Color.WHITE)
+	if landing:
+		draw_centered("ELEGIDO: " + MapCatalogScript.NAMES[map_roulette_result], Vector2(960, 860), 30, Color.WHITE)
 
 func open_loadout_select(is_online: bool) -> void:
 	mode_selected = false
@@ -1555,5 +1715,5 @@ func draw_placement_preview() -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 func tower_texture_for(kind: int):
-	var textures := [DART_RANGER_TEXTURE, BOOMERANG_SCOUT_TEXTURE, BOMBARDIER_TEXTURE, LIGHTNING_MAGE_TEXTURE, MYSTIC_ARCHER_TEXTURE, BANANA_FARMER_TEXTURE, REEF_MEDIC_TEXTURE, TIDE_CAPTAIN_TEXTURE]
+	var textures := [DART_RANGER_TEXTURE, BOOMERANG_SCOUT_TEXTURE, BOMBARDIER_TEXTURE, LIGHTNING_MAGE_TEXTURE, MYSTIC_ARCHER_TEXTURE, BANANA_FARMER_TEXTURE, REEF_MEDIC_TEXTURE, PIRATE_TEXTURE]
 	return textures[kind]
