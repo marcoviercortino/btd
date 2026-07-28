@@ -1259,7 +1259,8 @@ func upgrade_inspected_tower(branch: int) -> void:
 		return
 	var branches: Array = TowerCatalogScript.upgrade_branches(int(tower.type))
 	var upgrade: Dictionary = branches[branch].levels[level]
-	if bool(upgrade.get("final", false)) and ultimate_tower_types.has(int(tower.type)):
+	var ultimate_key := "%d_%d" % [int(tower.type), branch]
+	if bool(upgrade.get("final", false)) and ultimate_tower_types.has(ultimate_key):
 		return
 	var cost: int = int(upgrade.get("cost", 0))
 	if money < cost:
@@ -1291,7 +1292,7 @@ func upgrade_inspected_tower(branch: int) -> void:
 	if upgrade.has("reload_mult"):
 		tower.reload *= float(upgrade.reload_mult)
 	if bool(upgrade.get("final", false)):
-		ultimate_tower_types[int(tower.type)] = true
+		ultimate_tower_types[ultimate_key] = true
 	upgrade_effects.append({"position": tower.position, "time": 0.9, "color": TOWER_COLORS[int(tower.type)], "title": str(upgrade.name)})
 	game_sound.play_upgrade_effect()
 
@@ -1668,6 +1669,7 @@ func _draw() -> void:
 	for tower in towers:
 		var tower_texture = tower_texture_for(tower.type)
 		draw_texture_rect(tower_texture, Rect2(tower.position - Vector2(34, 38), Vector2(68, 68)), false)
+		draw_tower_upgrade_decorations(tower)
 	draw_spikes(spikes)
 	for balloon in balloons:
 		draw_balloon(point_on_path(balloon.distance), balloon)
@@ -2126,6 +2128,7 @@ func draw_duel_arena(origin: Vector2, arena_towers: Array, arena_balloons: Array
 	for tower in arena_towers:
 		var tower_texture = tower_texture_for(tower.type)
 		draw_texture_rect(tower_texture, Rect2(tower.position - Vector2(34, 38), Vector2(68, 68)), false)
+		draw_tower_upgrade_decorations(tower)
 	for balloon in arena_balloons:
 		draw_balloon(point_on_path(balloon.distance), balloon)
 	for projectile in arena_projectiles:
@@ -2151,6 +2154,31 @@ func draw_upgrade_effects(origin: Vector2) -> void:
 			draw_circle(effect.position + Vector2(cos(angle), sin(angle)) * radius, 4.0, Color(1.0, 0.92, 0.45, alpha))
 		draw_centered(str(effect.title), effect.position + Vector2(0, -radius - 12), 18, Color(1.0, 1.0, 1.0, alpha))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+func draw_tower_upgrade_decorations(tower: Dictionary) -> void:
+	var levels: Array = tower.get("branch_levels", [0, 0, 0])
+	var power: int = int(levels[0])
+	var range_level: int = int(levels[1])
+	var rhythm: int = int(levels[2])
+	if power <= 0 and range_level <= 0 and rhythm <= 0:
+		return
+	var position: Vector2 = tower.position
+	if power > 0:
+		var glow_radius := 38.0 + power * 4.0
+		draw_arc(position, glow_radius, 0.15, PI - 0.15, 18, Color(1.0, 0.73, 0.25, 0.45), 2.0 + power * 0.4)
+		if int(tower.type) == 4:
+			# Mystic Archer: a visibly larger gilded bow for the power path.
+			var bow_size := 34.0 + power * 7.0
+			draw_arc(position + Vector2(-8, 0), bow_size, -PI * 0.62, PI * 0.62, 22, Color("f4d66d"), 3.0 + power * 0.6)
+			draw_line(position + Vector2(-8, -bow_size), position + Vector2(-8, bow_size), Color("e7f7ff"), 1.5)
+			for gem in range(power):
+				draw_circle(position + Vector2(15 + gem * 7, -25), 2.5, Color("b99aff"))
+	if range_level > 0:
+		draw_arc(position, 42.0 + range_level * 3.0, 0.0, TAU, 26, Color(0.35, 0.85, 1.0, 0.24), 1.5)
+	if rhythm > 0:
+		for mark in range(rhythm):
+			var angle: float = float(mark) * TAU / float(maxi(1, rhythm)) - PI * 0.5
+			draw_circle(position + Vector2(cos(angle), sin(angle)) * (36.0 + rhythm * 2.0), 2.4, Color(0.55, 1.0, 0.72, 0.72))
 
 func draw_dart(position: Vector2, color: Color, direction: Vector2, kind := 0) -> void:
 	if kind == 1:
@@ -2709,6 +2737,10 @@ func draw_inspected_tower_menu() -> void:
 	var levels: Array = tower.get("branch_levels", [0, 0, 0])
 	var primary_branch: int = int(tower.get("primary_branch", -1))
 	var secondary_branch: int = int(tower.get("secondary_branch", -1))
+	var used_branches := 0
+	for branch_level in levels:
+		if int(branch_level) > 0:
+			used_branches += 1
 	for branch in range(3):
 		var rect := Rect2(995 + branch * 150, 905, 145, 55)
 		var level: int = int(levels[branch])
@@ -2717,10 +2749,14 @@ func draw_inspected_tower_menu() -> void:
 		var next_cost := 0
 		if level < mini(max_level, branches[branch].levels.size()):
 			next_cost = int(branches[branch].levels[level].get("cost", 0))
-		var color := Color("6f353d") if next_cost > money else Color("4b7d9e") if branch == primary_branch else Color("76543a") if branch == secondary_branch else Color("35475a")
+		var maxed := level >= max_level
+		var locked := not maxed and ((level == 0 and used_branches >= 2) or (primary_branch >= 0 and branch != primary_branch and secondary_branch >= 0 and branch != secondary_branch))
+		var color := Color("d1a83b") if maxed else Color("4c515a") if locked else Color("6f353d") if next_cost > money else Color("3f986c")
 		draw_style_box(make_box(color, 8), rect)
+		if maxed:
+			draw_arc(rect.get_center(), 27.0, 0.0, TAU, 20, Color("fff1a3"), 2.0)
 		draw_centered(str(branches[branch].name), rect.get_center() + Vector2(0, -8), 15, Color.WHITE)
-		draw_centered("%s %d/%d" % [role, level, max_level], rect.get_center() + Vector2(0, 14), 12, Color("d9eef4"))
+		draw_centered("Máximo Nivel" if maxed else "🔒 BLOQUEADA" if locked else "%s %d/%d" % [role, level, max_level], rect.get_center() + Vector2(0, 14), 12, Color("fff1a3") if maxed else Color("d9eef4"))
 	if hover_upgrade_branch >= 0 and hover_upgrade_branch < branches.size():
 		var hover_level: int = int(levels[hover_upgrade_branch])
 		if hover_level < branches[hover_upgrade_branch].levels.size():

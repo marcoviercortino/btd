@@ -28,7 +28,7 @@ func set_music(new_mode: String) -> void:
 	music_mode = new_mode
 	music_time = 0.0
 	if new_mode == "game":
-		game_track = randi_range(0, 2)
+		game_track = randi_range(0, 5)
 	if not music_player:
 		music_player = AudioStreamPlayer.new()
 		var stream := AudioStreamGenerator.new()
@@ -51,7 +51,7 @@ func _process(delta: float) -> void:
 
 func make_music_sample(time: float) -> float:
 	var upbeat := music_mode == "game"
-	var beat: float = [0.42, 0.36, 0.48][game_track] if upbeat else 0.86
+	var beat: float = [0.42, 0.36, 0.48, 0.32, 0.40, 0.29][game_track] if upbeat else 0.86
 	var step := int(floor(time / beat))
 	var chord: float
 	var melody_note: float
@@ -62,6 +62,18 @@ func make_music_sample(time: float) -> float:
 		2:
 			chord = [0.0, 3.0, 8.0, 5.0][int(floor(float(step) / 4.0)) % 4]
 			melody_note = [12.0, 15.0, 19.0, 22.0][step % 4]
+		3:
+			# Fast swing with bright brass-like syncopation.
+			chord = [0.0, 10.0, 5.0, 7.0][int(floor(float(step) / 4.0)) % 4]
+			melody_note = [16.0, 19.0, 14.0, 21.0][step % 4]
+		4:
+			# Bouncy walking-bass groove.
+			chord = [0.0, 4.0, 7.0, 2.0][int(floor(float(step) / 4.0)) % 4]
+			melody_note = [12.0, 17.0, 20.0, 15.0][step % 4]
+		5:
+			# Up-tempo club-jazz turnaround.
+			chord = [0.0, 3.0, 6.0, 9.0][int(floor(float(step) / 4.0)) % 4]
+			melody_note = [19.0, 14.0, 22.0, 17.0][step % 4]
 		_:
 			chord = [0.0, 5.0, 3.0, 7.0][int(floor(float(step) / 4.0)) % 4]
 			melody_note = [12.0, 16.0, 19.0, 16.0][step % 4]
