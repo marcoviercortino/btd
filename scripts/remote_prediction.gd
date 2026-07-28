@@ -11,11 +11,14 @@ static func merge_projectiles(current: Array[Dictionary], incoming: Array) -> Ar
 	for snapshot in incoming:
 		if existing.has(snapshot.id):
 			var predicted: Dictionary = existing[snapshot.id]
-			predicted.target_position = snapshot.target_position
-			predicted.direction = snapshot.direction
-			predicted.speed = snapshot.speed
-			predicted.kind = snapshot.kind
-			predicted.remaining = max(predicted.remaining, snapshot.remaining)
+			# Mystic arrows keep their initial firing vector. Replacing it every
+			# snapshot made the rival's arrow bend or stop at the old target.
+			if snapshot.kind != 4:
+				predicted.target_position = snapshot.target_position
+				predicted.direction = snapshot.direction
+				predicted.speed = snapshot.speed
+				predicted.kind = snapshot.kind
+				predicted.remaining = max(predicted.remaining, snapshot.remaining)
 			merged.append(predicted)
 		else:
 			merged.append(snapshot.duplicate(true))
