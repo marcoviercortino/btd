@@ -2605,7 +2605,7 @@ func draw_inspected_tower_menu() -> void:
 	if inspected_tower_index < 0 or inspected_tower_index >= towers.size() or not online_mode:
 		return
 	var tower: Dictionary = towers[inspected_tower_index]
-	var kind: int = tower.type
+	var kind: int = clampi(int(tower.get("type", 0)), 0, TOWER_NAMES.size() - 1)
 	var font := ThemeDB.fallback_font
 	var panel := Rect2(970, 760, 540, 270)
 	draw_style_box(make_box(Color(0.06, 0.14, 0.20, 0.97), 14), panel)
@@ -2623,14 +2623,15 @@ func draw_inspected_tower_menu() -> void:
 		draw_string(font, Vector2(1418, 867), "›", HORIZONTAL_ALIGNMENT_LEFT, -1, 27, Color.WHITE)
 		draw_centered(target_modes[target_mode], Vector2(1321, 866), 17, Color("f4d66d"))
 	draw_string(font, Vector2(995, 896), "Daño total: %d   ·   Globos explotados: %d" % [int(tower.get("damage_dealt", 0)), int(tower.get("bloons_popped", 0))], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("d9eef4"))
-	var upgrades := TowerCatalogScript.upgrades(kind)
-	var upgrade_level: int = int(tower.get("upgrade_level", 0))
+	var upgrades: Array = TowerCatalogScript.upgrades(kind)
+	var upgrade_level: int = clampi(int(tower.get("upgrade_level", 0)), 0, upgrades.size())
 	if upgrade_level < upgrades.size():
 		var next_upgrade: Dictionary = upgrades[upgrade_level]
-		var can_buy_upgrade: bool = money >= int(next_upgrade.cost)
+		var upgrade_cost: int = int(next_upgrade.get("cost", 0))
+		var can_buy_upgrade: bool = money >= upgrade_cost
 		draw_style_box(make_box(Color("4b7d9e") if can_buy_upgrade else Color("6f353d"), 9), Rect2(995, 905, 450, 55))
-		draw_string(font, Vector2(1008, 929), "MEJORA %d/3 · %s · $%d" % [upgrade_level + 1, next_upgrade.name, next_upgrade.cost], HORIZONTAL_ALIGNMENT_LEFT, 425, 16, Color.WHITE)
-		draw_string(font, Vector2(1008, 950), str(next_upgrade.description), HORIZONTAL_ALIGNMENT_LEFT, 425, 13, Color("d9eef4"))
+		draw_string(font, Vector2(1008, 929), "MEJORA %d/3 · %s · $%d" % [upgrade_level + 1, str(next_upgrade.get("name", "Mejora")), upgrade_cost], HORIZONTAL_ALIGNMENT_LEFT, 425, 16, Color.WHITE)
+		draw_string(font, Vector2(1008, 950), str(next_upgrade.get("description", "Mejora de torre")), HORIZONTAL_ALIGNMENT_LEFT, 425, 13, Color("d9eef4"))
 	else:
 		draw_style_box(make_box(Color("4b9b78"), 9), Rect2(995, 905, 450, 55))
 		draw_centered("MEJORAS COMPLETAS · NIVEL 3", Vector2(1220, 939), 17, Color.WHITE)
