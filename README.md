@@ -13,6 +13,12 @@ La versión actual se ejecuta a **1920×1080**. En el duelo online los dos mapas
 
 Godot importa automáticamente estos SVG como texturas al abrir el proyecto.
 
+## Torres adicionales
+
+- **Bombardero** — $400: proyectil medio, explosión de área pequeña, daño 1.
+- **Mago** — $450: rayo de daño 1 que conecta hasta 5 globos cercanos.
+- **Arquero místico** — $600: flechas rápidas que atraviesan globos durante un largo recorrido.
+
 ## Abrir y jugar
 
 1. Abre Godot 4.x.

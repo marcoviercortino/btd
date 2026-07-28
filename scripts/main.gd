@@ -3,13 +3,16 @@ extends Node2D
 const WIDTH := 1920.0
 const HEIGHT := 1080.0
 const PLAY_RECT := Rect2(250, 0, 1030, 720)
-const TOWER_COSTS := [120, 330]
-const TOWER_NAMES := ["Dardo", "Bumerán"]
-const TOWER_COLORS := [Color("6cc4ed"), Color("ffcc66")]
+const TOWER_COSTS := [120, 330, 400, 450, 600]
+const TOWER_NAMES := ["Dardo", "Bumerán", "Bombardero", "Mago", "Arquero místico"]
+const TOWER_COLORS := [Color("6cc4ed"), Color("ffcc66"), Color("ef8256"), Color("7aa9ff"), Color("9a7ee8")]
 const MAP_TEXTURE = preload("res://assets/coral_bend_map.svg")
 const DART_RANGER_TEXTURE = preload("res://assets/characters/dart_ranger.svg")
 const BOOMERANG_SCOUT_TEXTURE = preload("res://assets/characters/boomerang_scout.svg")
 const GUARDIAN_TEXTURE = preload("res://assets/characters/guardian.svg")
+const BOMBARDIER_TEXTURE = preload("res://assets/characters/bombardier.svg")
+const LIGHTNING_MAGE_TEXTURE = preload("res://assets/characters/lightning_mage.svg")
+const MYSTIC_ARCHER_TEXTURE = preload("res://assets/characters/mystic_archer.svg")
 
 var path := PackedVector2Array([
 	Vector2(250, 170), Vector2(470, 170), Vector2(530, 310),
@@ -20,6 +23,7 @@ var path_total := 1.0
 var balloons: Array[Dictionary] = []
 var towers: Array[Dictionary] = []
 var projectiles: Array[Dictionary] = []
+var lightning_effects: Array[Dictionary] = []
 var money := 650
 var lives := 30
 var wave := 0
@@ -51,6 +55,7 @@ var rival_projectiles: Array[Dictionary] = []
 var rival_defeated := false
 var net_sync_timer := 0.0
 var auto_wave_timer := 2.5
+var next_balloon_id := 1
 var placement_tower := -1
 var hover_tower := -1
 var cursor_position := Vector2.ZERO
@@ -79,6 +84,7 @@ func _process(delta: float) -> void:
 		update_rival_prediction(delta)
 	update_towers(delta)
 	update_projectiles(delta)
+	update_lightning_effects(delta)
 	if online_mode:
 		net_sync_timer -= delta
 		if net_sync_timer <= 0.0:
@@ -163,7 +169,8 @@ func spawn_balloon() -> void:
 		tier = 3
 	var hp := tier
 	var base_speed := 58.0 + wave * 4.0
-	balloons.append({"distance": 0.0, "base_speed": base_speed, "speed": base_speed + tier * 7.0, "hp": hp, "max_hp": hp, "tier": tier})
+	balloons.append({"id": next_balloon_id, "distance": 0.0, "base_speed": base_speed, "speed": base_speed + tier * 7.0, "hp": hp, "max_hp": hp, "tier": tier})
+	next_balloon_id += 1
 
 func update_balloons(delta: float) -> void:
 	for i in range(balloons.size() - 1, -1, -1):
@@ -205,38 +212,92 @@ func update_towers(delta: float) -> void:
 				target_index = i
 				best_distance = balloons[i].distance
 		if target_index >= 0:
-			var locked_target_position := point_on_path(balloons[target_index].distance)
-			var shot_direction: Vector2 = (locked_target_position - tower.position).normalized()
-			projectiles.append({"position": tower.position, "target": target_index, "target_position": locked_target_position, "damage": tower.damage, "speed": 600.0, "color": tower.color, "direction": shot_direction})
+			if tower.type == 3:
+				cast_chain_lightning(tower.position, target_index)
+			else:
+				var locked_target_position := point_on_path(balloons[target_index].distance)
+				var shot_direction: Vector2 = (locked_target_position - tower.position).normalized()
+				projectiles.append({"position": tower.position, "target": target_index, "target_position": locked_target_position, "damage": tower.damage, "speed": tower.projectile_speed, "color": tower.color, "direction": shot_direction, "kind": tower.type, "remaining": tower.projectile_range, "hit_ids": []})
 			tower.cooldown = tower.reload
+
+func cast_chain_lightning(origin: Vector2, first_target: int) -> void:
+	var chain_points: Array[Vector2] = [origin]
+	var used: Array[int] = []
+	var current_index := first_target
+	for _jump in range(5):
+		if current_index < 0 or current_index >= balloons.size():
+			break
+		chain_points.append(point_on_path(balloons[current_index].distance))
+		used.append(current_index)
+		damage_balloon(current_index, 1)
+		var next_index := -1
+		var best_distance := INF
+		var origin_point := chain_points[chain_points.size() - 1]
+		for i in balloons.size():
+			if i in used:
+				continue
+			var candidate := point_on_path(balloons[i].distance)
+			var candidate_distance := origin_point.distance_to(candidate)
+			if candidate_distance < best_distance:
+				best_distance = candidate_distance
+				next_index = i
+		current_index = next_index
+	lightning_effects.append({"points": chain_points, "time": 0.78})
+
+func update_lightning_effects(delta: float) -> void:
+	for i in range(lightning_effects.size() - 1, -1, -1):
+		lightning_effects[i].time -= delta
+		if lightning_effects[i].time <= 0.0:
+			lightning_effects.remove_at(i)
 
 func update_projectiles(delta: float) -> void:
 	for i in range(projectiles.size() - 1, -1, -1):
 		var p := projectiles[i]
+		var previous_position: Vector2 = p.position
+		if p.kind == 4:
+			p.position += p.direction * p.speed * delta
+			p.remaining -= p.speed * delta
+			for j in range(balloons.size() - 1, -1, -1):
+				if balloons[j].id not in p.hit_ids and p.position.distance_to(point_on_path(balloons[j].distance)) < 24.0:
+					p.hit_ids.append(balloons[j].id)
+					damage_balloon(j, p.damage)
+			if p.remaining <= 0.0:
+				projectiles.remove_at(i)
+			continue
 		if p.target < 0 or p.target >= balloons.size():
 			projectiles.remove_at(i)
 			continue
 		var target_pos: Vector2 = p.target_position
-		var previous_position: Vector2 = p.position
 		p.position = p.position.move_toward(target_pos, p.speed * delta)
 		var movement: Vector2 = p.position - previous_position
 		if movement.length_squared() > 0.01:
 			p.direction = movement.normalized()
 		if p.position.distance_to(target_pos) < 15.0:
-			balloons[p.target].hp -= p.damage
-			if balloons[p.target].hp <= 0:
-				if balloons[p.target].tier > 1:
-					balloons[p.target].tier -= 1
-					balloons[p.target].max_hp = balloons[p.target].tier
-					balloons[p.target].hp = balloons[p.target].tier
-					balloons[p.target].speed = balloons[p.target].base_speed + balloons[p.target].tier * 7.0
-				else:
-					money += 12
-					balloons.remove_at(p.target)
-					for other in projectiles:
-						if other.target > p.target:
-							other.target -= 1
+			if p.kind == 2:
+				for j in range(balloons.size() - 1, -1, -1):
+					if point_on_path(balloons[j].distance).distance_to(target_pos) <= 68.0:
+						damage_balloon(j, p.damage)
+			else:
+				damage_balloon(p.target, p.damage)
 			projectiles.remove_at(i)
+
+func damage_balloon(index: int, damage: int) -> void:
+	if index < 0 or index >= balloons.size():
+		return
+	balloons[index].hp -= damage
+	if balloons[index].hp > 0:
+		return
+	if balloons[index].tier > 1:
+		balloons[index].tier -= 1
+		balloons[index].max_hp = balloons[index].tier
+		balloons[index].hp = balloons[index].tier
+		balloons[index].speed = balloons[index].base_speed + balloons[index].tier * 7.0
+		return
+	money += 12
+	balloons.remove_at(index)
+	for other in projectiles:
+		if other.target > index:
+			other.target -= 1
 
 func point_on_path(distance: float) -> Vector2:
 	var remaining := distance
@@ -317,11 +378,13 @@ func place_tower_local(position: Vector2, tower_kind: int) -> void:
 	if not can_place_tower(position, tower_kind):
 		return
 	money -= TOWER_COSTS[tower_kind]
-	var is_boomerang := tower_kind == 1
+	var config := tower_config(tower_kind)
 	towers.append({
-		"position": position, "range": 135.0 if not is_boomerang else 180.0,
-		"damage": 1 if not is_boomerang else 2,
-		"reload": 0.38 if not is_boomerang else 0.82,
+		"position": position, "range": config.range,
+		"damage": config.damage,
+		"reload": config.reload,
+		"projectile_speed": config.projectile_speed,
+		"projectile_range": config.projectile_range,
 		"cooldown": 0.0, "color": TOWER_COLORS[tower_kind], "type": tower_kind
 	})
 	if multiplayer_mode:
@@ -331,11 +394,23 @@ func can_place_tower(position: Vector2, tower_kind: int) -> bool:
 	return PLAY_RECT.has_point(position) and money >= TOWER_COSTS[tower_kind] and not too_close_to_path(position) and not too_close_to_tower(position)
 
 func tower_button_at(position: Vector2) -> int:
-	if Rect2(30, 850, 260, 150).has_point(position):
-		return 0
-	if Rect2(310, 850, 260, 150).has_point(position):
-		return 1
+	for kind in range(TOWER_NAMES.size()):
+		if tower_button_rect(kind).has_point(position):
+			return kind
 	return -1
+
+func tower_config(kind: int) -> Dictionary:
+	var configs := [
+		{"range": 135.0, "damage": 1, "reload": 0.38, "projectile_speed": 600.0, "projectile_range": 260.0},
+		{"range": 180.0, "damage": 2, "reload": 0.82, "projectile_speed": 520.0, "projectile_range": 270.0},
+		{"range": 155.0, "damage": 1, "reload": 1.25, "projectile_speed": 360.0, "projectile_range": 260.0},
+		{"range": 120.0, "damage": 1, "reload": 1.35, "projectile_speed": 0.0, "projectile_range": 0.0},
+		{"range": 240.0, "damage": 1, "reload": 0.62, "projectile_speed": 940.0, "projectile_range": 520.0}
+	]
+	return configs[kind]
+
+func tower_button_rect(kind: int) -> Rect2:
+	return Rect2(22 + kind * 185, 850, 170, 150)
 
 @rpc("any_peer", "unreliable")
 func rpc_update_rival(remote_lives: int, remote_money: int, remote_wave: int, remote_towers: Array, remote_balloons: Array, remote_projectiles_data: Array, remote_lost: bool) -> void:
@@ -356,11 +431,13 @@ func rpc_report_defeat() -> void:
 
 @rpc("any_peer", "reliable")
 func rpc_place_rival_tower(position: Vector2, tower_kind: int) -> void:
-	var is_boomerang := tower_kind == 1
+	var config := tower_config(tower_kind)
 	rival_towers.append({
-		"position": position, "range": 135.0 if not is_boomerang else 180.0,
-		"damage": 1 if not is_boomerang else 2,
-		"reload": 0.38 if not is_boomerang else 0.82,
+		"position": position, "range": config.range,
+		"damage": config.damage,
+		"reload": config.reload,
+		"projectile_speed": config.projectile_speed,
+		"projectile_range": config.projectile_range,
 		"cooldown": 0.0, "color": TOWER_COLORS[tower_kind], "type": tower_kind
 	})
 
@@ -397,7 +474,7 @@ func _draw() -> void:
 	if online_mode:
 		draw_duel_status()
 	for tower in towers:
-		var tower_texture = DART_RANGER_TEXTURE if tower.type == 0 else BOOMERANG_SCOUT_TEXTURE
+		var tower_texture = tower_texture_for(tower.type)
 		draw_texture_rect(tower_texture, Rect2(tower.position - Vector2(34, 38), Vector2(68, 68)), false)
 	for balloon in balloons:
 		draw_balloon(point_on_path(balloon.distance), balloon)
@@ -426,7 +503,7 @@ func draw_hud() -> void:
 func draw_tower_card(rect: Rect2, kind: int, title: String, subtitle: String) -> void:
 	var active := kind == selected_tower
 	draw_style_box(make_box(Color("31546c") if active else Color("203c50"), 9), rect)
-	var card_texture = DART_RANGER_TEXTURE if kind == 0 else BOOMERANG_SCOUT_TEXTURE
+	var card_texture = tower_texture_for(kind)
 	draw_texture_rect(card_texture, Rect2(rect.position + Vector2(5, 4), Vector2(57, 57)), false)
 	var font := ThemeDB.fallback_font
 	draw_string(font, rect.position + Vector2(60, 30), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color.WHITE)
@@ -592,6 +669,7 @@ func draw_online_duel() -> void:
 	draw_duel_arena(Vector2(0, 270), towers, balloons, projectiles)
 	draw_duel_arena(Vector2(960, 270), rival_towers, rival_balloons, rival_projectiles)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	draw_local_lightning()
 	draw_placement_preview()
 	draw_rect(Rect2(956, 0, 8, HEIGHT), Color("f4d66d"))
 	draw_style_box(make_box(Color(0.05, 0.18, 0.25, 0.92), 12), Rect2(30, 34, 690, 120))
@@ -601,8 +679,8 @@ func draw_online_duel() -> void:
 	draw_string(font, Vector2(60, 126), "VIDAS %d  ·  $ %d  ·  OLEADA %d" % [lives, money, wave], HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
 	draw_string(font, Vector2(1230, 82), "FRENTE RIVAL", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color("ffb0a8"))
 	draw_string(font, Vector2(1230, 126), "VIDAS %d  ·  $ %d  ·  OLEADA %d" % [rival_lives, rival_money, rival_wave], HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
-	draw_tower_button(Rect2(30, 850, 260, 150), 0)
-	draw_tower_button(Rect2(310, 850, 260, 150), 1)
+	for kind in range(TOWER_NAMES.size()):
+		draw_tower_button(tower_button_rect(kind), kind)
 	draw_tower_tooltip()
 	if game_over or won:
 		draw_rect(Rect2(0, 0, WIDTH, HEIGHT), Color(0.03, 0.08, 0.13, 0.78))
@@ -613,7 +691,7 @@ func draw_duel_arena(origin: Vector2, arena_towers: Array, arena_balloons: Array
 	draw_set_transform(origin, 0.0, Vector2(0.75, 0.75))
 	draw_texture_rect(MAP_TEXTURE, Rect2(0, 0, 1280, 720), false)
 	for tower in arena_towers:
-		var tower_texture = DART_RANGER_TEXTURE if tower.type == 0 else BOOMERANG_SCOUT_TEXTURE
+		var tower_texture = tower_texture_for(tower.type)
 		draw_texture_rect(tower_texture, Rect2(tower.position - Vector2(34, 38), Vector2(68, 68)), false)
 	for balloon in arena_balloons:
 		draw_balloon(point_on_path(balloon.distance), balloon)
@@ -627,12 +705,21 @@ func draw_dart(position: Vector2, color: Color, direction: Vector2) -> void:
 	draw_line(tail, tip, color, 2.5)
 	draw_circle(tip, 3.5, Color.WHITE)
 
+func draw_local_lightning() -> void:
+	draw_set_transform(Vector2(0, 270), 0.0, Vector2(0.75, 0.75))
+	for effect in lightning_effects:
+		var points: Array = effect.points
+		for i in range(points.size() - 1):
+			draw_line(points[i], points[i + 1], Color("d8f5ff"), 5.0)
+			draw_line(points[i], points[i + 1], Color("70cfff"), 2.0)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
 func draw_tower_button(rect: Rect2, kind: int) -> void:
 	var active := placement_tower == kind
 	var hovered := hover_tower == kind
 	var fill := Color("31546c") if active else Color("294a60") if hovered else Color("1d4055")
 	draw_style_box(make_box(fill, 12), rect)
-	var tower_texture = DART_RANGER_TEXTURE if kind == 0 else BOOMERANG_SCOUT_TEXTURE
+	var tower_texture = tower_texture_for(kind)
 	draw_texture_rect(tower_texture, Rect2(rect.position + Vector2(10, 16), Vector2(100, 100)), false)
 	var font := ThemeDB.fallback_font
 	draw_string(font, rect.position + Vector2(120, 50), TOWER_NAMES[kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 25, Color.WHITE)
@@ -642,12 +729,13 @@ func draw_tower_button(rect: Rect2, kind: int) -> void:
 func draw_tower_tooltip() -> void:
 	if hover_tower < 0:
 		return
-	var rect := Rect2(600, 850, 340, 150)
+	var rect := Rect2(970, 850, 480, 150)
 	draw_style_box(make_box(Color(0.07, 0.14, 0.20, 0.96), 12), rect)
 	var font := ThemeDB.fallback_font
-	var damage := 1 if hover_tower == 0 else 2
-	var attack_speed := "0.38 s" if hover_tower == 0 else "0.82 s"
-	var range_value := "135" if hover_tower == 0 else "180"
+	var config := tower_config(hover_tower)
+	var damage: int = config.damage
+	var attack_speed := "%.2f s" % config.reload
+	var range_value := "%d" % config.range
 	draw_string(font, rect.position + Vector2(20, 34), TOWER_NAMES[hover_tower], HORIZONTAL_ALIGNMENT_LEFT, -1, 24, TOWER_COLORS[hover_tower])
 	draw_string(font, rect.position + Vector2(20, 67), "Coste: $ %d   ·   Daño: %d" % [TOWER_COSTS[hover_tower], damage], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
 	draw_string(font, rect.position + Vector2(20, 96), "Velocidad de ataque: %s" % attack_speed, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
@@ -659,7 +747,11 @@ func draw_placement_preview() -> void:
 	var preview_position := (cursor_position - Vector2(0, 270)) / Vector2(0.75, 0.75)
 	var is_valid := can_place_tower(preview_position, placement_tower)
 	var tint := Color(1.0, 1.0, 1.0, 0.55) if is_valid else Color(1.0, 0.28, 0.28, 0.62)
-	var texture = DART_RANGER_TEXTURE if placement_tower == 0 else BOOMERANG_SCOUT_TEXTURE
+	var texture = tower_texture_for(placement_tower)
 	draw_set_transform(Vector2(0, 270), 0.0, Vector2(0.75, 0.75))
 	draw_texture_rect(texture, Rect2(preview_position - Vector2(34, 38), Vector2(68, 68)), false, tint)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+func tower_texture_for(kind: int):
+	var textures := [DART_RANGER_TEXTURE, BOOMERANG_SCOUT_TEXTURE, BOMBARDIER_TEXTURE, LIGHTNING_MAGE_TEXTURE, MYSTIC_ARCHER_TEXTURE]
+	return textures[kind]
