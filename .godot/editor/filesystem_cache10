@@ -1,6 +1,6 @@
 78098b89c88a74ebe8c20117b8754620
-::res://::1785233206
-Main.tscn::PackedScene::-1::1785186970::0::1::::<><><>0<>0<><>::res://scripts/main.gd
+::res://::1785240361
+Main.tscn::PackedScene::8594866108231562909::1785240361::0::1::::<><><>0<>0<><>::uid://blptgl6hrqw2x::::res://scripts/main.gd
 README.md::TextFile::-1::1785200980::0::1::::<><><>0<>0<><>::
 ::res://assets/::1785238803
 coral_bend_map.svg::CompressedTexture2D::608779049058291623::1785187177::1785187225::1::::<><><>0<>0<>e715ac35cbf59c66ad36353fd26a657a<>res://.godot/imported/coral_bend_map.svg-9657c90f35d9fc1a303e346133cca690.ctex::
@@ -34,10 +34,10 @@ sky_ruins.svg::CompressedTexture2D::4239609664095722912::1785238806::1785238819:
 volcano_pass.svg::CompressedTexture2D::8176783159018319772::1785238803::1785238819::1::::<><><>0<>0<>6ed4fe32cab7b4ffe0d0e07978c8354b<>res://.godot/imported/volcano_pass.svg-e84511bd4eb56d334e9110551afa9cc2.ctex::
 ::res://export_templates/::1785187356
 ::res://feature_profiles/::1785187356
-::res://scripts/::1785238819
+::res://scripts/::1785241106
 game_sound.gd::GDScript::2658819998818871204::1785236066::0::1::::GameSound<>Node<><>0<>0<><>::
-main.gd::GDScript::3190628593635555509::1785239478::0::1::::<>Node2D<><>0<>0<><>::
-map_catalog.gd::GDScript::7564190244940966043::1785238807::0::1::::MapCatalog<>RefCounted<><>0<>0<><>::
+main.gd::GDScript::3190628593635555509::1785241057::0::1::::<>Node2D<><>0<>0<><>::
+map_catalog.gd::GDScript::7564190244940966043::1785241106::0::1::::MapCatalog<>RefCounted<><>0<>0<><>::
 remote_prediction.gd::GDScript::6028864848802364766::1785235786::0::1::::RemotePrediction<>RefCounted<><>0<>0<><>::
 tower_catalog.gd::GDScript::8982837337347372000::1785238865::0::1::::TowerCatalog<>RefCounted<><>0<>0<><>::
 ::res://script_templates/::1785187356

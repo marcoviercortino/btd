@@ -1,7 +1,6 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3 uid="uid://dupogotqkbafl"]
 
-[ext_resource path="res://scripts/main.gd" type="Script" id="1_main"]
+[ext_resource type="Script" uid="uid://blptgl6hrqw2x" path="res://scripts/main.gd" id="1_main"]
 
-[node name="BalloonFrontier" type="Node2D"]
+[node name="BalloonFrontier" type="Node2D" unique_id=1180798842]
 script = ExtResource("1_main")
-

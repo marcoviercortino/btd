@@ -6,10 +6,10 @@ const PLAY_RECT := Rect2(250, 0, 1030, 720)
 const TowerCatalogScript = preload("res://scripts/tower_catalog.gd")
 const RemotePredictionScript = preload("res://scripts/remote_prediction.gd")
 const GameSoundScript = preload("res://scripts/game_sound.gd")
+const MapCatalogScript = preload("res://scripts/map_catalog.gd")
 const TOWER_COSTS = TowerCatalogScript.COSTS
 const TOWER_NAMES = TowerCatalogScript.NAMES
 const TOWER_COLORS = TowerCatalogScript.COLORS
-const MAP_TEXTURE = preload("res://assets/coral_bend_map.svg")
 const DART_RANGER_TEXTURE = preload("res://assets/characters/dart_ranger.svg")
 const BOOMERANG_SCOUT_TEXTURE = preload("res://assets/characters/boomerang_scout.svg")
 const GUARDIAN_TEXTURE = preload("res://assets/characters/guardian.svg")
@@ -91,6 +91,15 @@ var local_wave_finished := false
 var rival_wave_finished := false
 var online_wave_start_timer := -1.0
 var game_sound: GameSound
+var map_select := false
+var selected_map_vote := -1
+var rival_map_vote := -1
+var map_ready := false
+var rival_map_ready := false
+var active_map := 0
+var map_reveal_time := 0.0
+var map_resolution_label := ""
+var map_resolution_spin := 0.0
 
 func _ready() -> void:
 	game_sound = GameSoundScript.new()
@@ -107,6 +116,10 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if money_popup_time > 0.0:
 		money_popup_time -= delta
+	if map_select:
+		update_map_selection(delta)
+		queue_redraw()
+		return
 	if loadout_select:
 		update_roulette(delta)
 		queue_redraw()
@@ -425,6 +438,9 @@ func _input(event: InputEvent) -> void:
 			hover_tower = tower_button_at(cursor_position)
 		queue_redraw()
 	if not mode_selected:
+		if map_select:
+			handle_map_select_input(event)
+			return
 		if loadout_select:
 			handle_loadout_input(event)
 			return
@@ -434,9 +450,9 @@ func _input(event: InputEvent) -> void:
 		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 			var menu_position: Vector2 = event.position / 1.5
 			if Rect2(250, 330, 230, 190).has_point(menu_position):
-				open_loadout_select(false)
+				open_map_select(false)
 			elif Rect2(525, 330, 230, 190).has_point(menu_position):
-				open_loadout_select(false)
+				open_map_select(false)
 				multiplayer_mode = true
 			elif Rect2(800, 330, 230, 190).has_point(menu_position):
 				online_lobby = true
@@ -665,6 +681,9 @@ func too_close_to_path(position: Vector2) -> bool:
 
 func _draw() -> void:
 	if not mode_selected:
+		if map_select:
+			draw_map_select()
+			return
 		if loadout_select:
 			draw_loadout_select()
 			return
@@ -678,7 +697,7 @@ func _draw() -> void:
 	if online_mode:
 		draw_online_duel()
 		return
-	draw_texture_rect(MAP_TEXTURE, Rect2(0, 0, WIDTH, HEIGHT), false)
+	draw_texture_rect(current_map_texture(), Rect2(0, 0, WIDTH, HEIGHT), false)
 	draw_rect(Rect2(0, 0, 248, HEIGHT), Color("102536"))
 	draw_line(Vector2(248, 0), Vector2(248, HEIGHT), Color("72d2c8"), 2.0)
 	draw_hud()
@@ -855,7 +874,7 @@ func launch_online_match() -> void:
 	online_mode = true
 	multiplayer_mode = false
 	editing_field = ""
-	open_loadout_select(true)
+	open_map_select(true)
 
 func draw_online_lobby() -> void:
 	draw_rect(Rect2(0, 0, WIDTH, HEIGHT), Color("102536"))
@@ -941,7 +960,7 @@ func draw_online_duel() -> void:
 
 func draw_duel_arena(origin: Vector2, arena_towers: Array, arena_balloons: Array, arena_projectiles: Array) -> void:
 	draw_set_transform(origin, 0.0, Vector2(0.75, 0.75))
-	draw_texture_rect(MAP_TEXTURE, Rect2(0, 0, 1280, 720), false)
+	draw_texture_rect(current_map_texture(), Rect2(0, 0, 1280, 720), false)
 	for tower in arena_towers:
 		var tower_texture = tower_texture_for(tower.type)
 		draw_texture_rect(tower_texture, Rect2(tower.position - Vector2(34, 38), Vector2(68, 68)), false)
@@ -979,6 +998,159 @@ func draw_banana_group(origin: Vector2, banana_list: Array) -> void:
 		draw_arc(banana.position, 9, 0.25, 2.75, 12, Color("fff3a0"), 3.0)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
+func current_map_texture():
+	return MapCatalogScript.TEXTURES[clampi(active_map, 0, MapCatalogScript.TEXTURES.size() - 1)]
+
+func rebuild_path_for_active_map() -> void:
+	path = MapCatalogScript.path_for(active_map)
+	path_lengths.clear()
+	path_total = 1.0
+	for i in range(path.size() - 1):
+		path_lengths.append(path[i].distance_to(path[i + 1]))
+		path_total += path_lengths[i]
+
+func open_map_select(is_online: bool) -> void:
+	mode_selected = false
+	map_select = true
+	online_mode = is_online
+	selected_map_vote = -1
+	rival_map_vote = -1
+	map_ready = false
+	rival_map_ready = false
+	map_reveal_time = 0.0
+	map_resolution_label = ""
+
+func map_card_rect(index: int) -> Rect2:
+	return Rect2(115 + (index % 2) * 865, 275 + (index / 2) * 245, 825, 210)
+
+func map_random_rect() -> Rect2:
+	return Rect2(700, 775, 520, 86)
+
+func map_ready_rect() -> Rect2:
+	return Rect2(760, 900, 400, 76)
+
+func handle_map_select_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE and map_reveal_time <= 0.0:
+		map_select = false
+		online_lobby = online_mode
+		return
+	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
+		return
+	if map_reveal_time > 0.0:
+		return
+	var mouse: Vector2 = event.position
+	if Rect2(40, 970, 180, 62).has_point(mouse):
+		map_select = false
+		online_lobby = online_mode
+		return
+	for index in range(MapCatalogScript.NAMES.size()):
+		if map_card_rect(index).has_point(mouse) and not map_ready:
+			selected_map_vote = index
+			queue_redraw()
+			return
+	if map_random_rect().has_point(mouse) and not map_ready:
+		selected_map_vote = MapCatalogScript.NAMES.size()
+		queue_redraw()
+		return
+	if map_ready_rect().has_point(mouse) and selected_map_vote >= 0 and not map_ready:
+		map_ready = true
+		if online_mode:
+			if multiplayer.is_server():
+				rpc_map_ready_indicator.rpc()
+				try_resolve_map_vote()
+			else:
+				rpc_submit_map_vote.rpc_id(1, selected_map_vote)
+		else:
+			begin_map_reveal(selected_map_vote if selected_map_vote < MapCatalogScript.NAMES.size() else rng.randi_range(0, MapCatalogScript.NAMES.size() - 1), "MAPA ELEGIDO")
+		queue_redraw()
+
+@rpc("any_peer", "reliable")
+func rpc_submit_map_vote(vote: int) -> void:
+	if not multiplayer.is_server():
+		return
+	rival_map_vote = clampi(vote, 0, MapCatalogScript.NAMES.size())
+	rival_map_ready = true
+	try_resolve_map_vote()
+
+@rpc("any_peer", "reliable")
+func rpc_map_ready_indicator() -> void:
+	rival_map_ready = true
+
+func try_resolve_map_vote() -> void:
+	if not multiplayer.is_server() or not map_ready or not rival_map_ready:
+		return
+	var random_vote := MapCatalogScript.NAMES.size()
+	var result := selected_map_vote
+	var resolution := "MAPA ELEGIDO"
+	if selected_map_vote == random_vote and rival_map_vote == random_vote:
+		result = rng.randi_range(0, random_vote - 1)
+		resolution = "RULETA DE MAPAS"
+	elif selected_map_vote == random_vote:
+		result = rival_map_vote
+		resolution = "VOTO RIVAL"
+	elif rival_map_vote == random_vote:
+		resolution = "TU VOTO"
+	elif selected_map_vote != rival_map_vote:
+		result = selected_map_vote if rng.randi_range(0, 1) == 0 else rival_map_vote
+		resolution = "LANZAMIENTO DE MONEDA"
+	rpc_begin_map_reveal.rpc(result, resolution)
+
+@rpc("any_peer", "call_local", "reliable")
+func rpc_begin_map_reveal(map_index: int, resolution: String) -> void:
+	begin_map_reveal(map_index, resolution)
+
+func begin_map_reveal(map_index: int, resolution: String) -> void:
+	active_map = clampi(map_index, 0, MapCatalogScript.NAMES.size() - 1)
+	rebuild_path_for_active_map()
+	map_resolution_label = resolution
+	map_reveal_time = 2.7
+	map_resolution_spin = 0.0
+
+func update_map_selection(delta: float) -> void:
+	if map_reveal_time <= 0.0:
+		return
+	map_reveal_time -= delta
+	map_resolution_spin += delta
+	if map_reveal_time <= 0.0:
+		map_select = false
+		open_loadout_select(online_mode)
+
+func draw_map_select() -> void:
+	draw_rect(Rect2(0, 0, WIDTH, HEIGHT), Color("102536"))
+	if map_reveal_time > 0.0:
+		draw_map_reveal()
+		return
+	var font := ThemeDB.fallback_font
+	draw_centered("ELIGE EL MAPA", Vector2(960, 105), 46, Color("72d2c8"))
+	draw_centered("Vota tu campo de batalla" if online_mode else "Selecciona el campo de batalla", Vector2(960, 155), 22, Color("d9eef4"))
+	for index in range(MapCatalogScript.NAMES.size()):
+		var rect := map_card_rect(index)
+		var selected := selected_map_vote == index
+		draw_style_box(make_box(Color("31546c") if selected else Color("1d4055"), 16), rect)
+		draw_texture_rect(MapCatalogScript.TEXTURES[index], Rect2(rect.position + Vector2(15, 15), Vector2(300, 180)), false)
+		draw_string(font, rect.position + Vector2(345, 78), MapCatalogScript.NAMES[index], HORIZONTAL_ALIGNMENT_LEFT, 410, 29, Color.WHITE)
+		draw_string(font, rect.position + Vector2(345, 120), "Ruta única · Defensa vertical", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color("bdd1de"))
+		draw_string(font, rect.position + Vector2(345, 165), "ELEGIDO" if selected else "Clic para votar", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color("f4d66d") if selected else Color("9ebfcf"))
+	var random_selected := selected_map_vote == MapCatalogScript.NAMES.size()
+	draw_style_box(make_box(Color("72559a") if random_selected else Color("3a3152"), 14), map_random_rect())
+	draw_centered("MAPA ALEATORIO  ·  %s" % ("ELEGIDO" if random_selected else "Clic para elegir"), Vector2(960, 830), 25, Color.WHITE)
+	var ready_enabled := selected_map_vote >= 0
+	draw_style_box(make_box(Color("4bba83") if ready_enabled else Color("355b70"), 12), map_ready_rect())
+	draw_centered("LISTO" if not map_ready else "ESPERANDO RIVAL", Vector2(960, 948), 26, Color.WHITE)
+	if online_mode:
+		draw_centered("Rival listo" if rival_map_ready else "El rival aún está votando", Vector2(960, 1000), 19, Color("f4d66d"))
+	draw_style_box(make_box(Color("294a60"), 10), Rect2(40, 970, 180, 62))
+	draw_string(font, Vector2(84, 1010), "VOLVER", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color.WHITE)
+
+func draw_map_reveal() -> void:
+	var pulse := 1.0 + sin(map_resolution_spin * 8.0) * 0.025
+	var size := Vector2(1100, 620) * pulse
+	var rect := Rect2(Vector2(960, 480) - size / 2.0, size)
+	draw_centered(map_resolution_label, Vector2(960, 125), 28, Color("f4d66d"))
+	draw_texture_rect(current_map_texture(), rect, false)
+	draw_style_box(make_box(Color(0.03, 0.08, 0.13, 0.88), 14), Rect2(610, 810, 700, 105))
+	draw_centered(MapCatalogScript.NAMES[active_map], Vector2(960, 875), 42, Color.WHITE)
+
 func open_loadout_select(is_online: bool) -> void:
 	mode_selected = false
 	loadout_select = true
@@ -998,12 +1170,13 @@ func handle_loadout_input(event: InputEvent) -> void:
 		return
 	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
 		return
-	if Rect2(40, 950, 180, 62).has_point(event.position):
+	var design_position: Vector2 = event.position
+	if Rect2(40, 950, 180, 62).has_point(design_position):
 		loadout_select = false
 		online_lobby = online_mode
 		return
 	for kind in range(TOWER_NAMES.size()):
-		if loadout_card_rect(kind).has_point(event.position):
+		if loadout_card_rect(kind).has_point(design_position):
 			if random_tower >= 0 or roulette_time > 0.0:
 				return
 			if kind in chosen_towers:
@@ -1012,11 +1185,11 @@ func handle_loadout_input(event: InputEvent) -> void:
 				chosen_towers.append(kind)
 			queue_redraw()
 			return
-	if Rect2(1480, 690, 300, 70).has_point(event.position) and roulette_rolls_left > 0 and roulette_time <= 0.0:
+	if Rect2(1480, 690, 300, 70).has_point(design_position) and roulette_rolls_left > 0 and roulette_time <= 0.0:
 		start_roulette()
 		queue_redraw()
 		return
-	if Rect2(760, 865, 400, 76).has_point(event.position) and chosen_towers.size() == 3 and random_tower >= 0:
+	if Rect2(760, 865, 400, 76).has_point(design_position) and chosen_towers.size() == 3 and random_tower >= 0:
 		loadout_ready = true
 		if online_mode:
 			if multiplayer.is_server():
@@ -1118,9 +1291,10 @@ func draw_random_slot(font: Font) -> void:
 		draw_string(font, rect.position + Vector2(165, 156), "$ %d" % TOWER_COSTS[roulette_display], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("ffd76a"))
 	else:
 		draw_centered("?", rect.get_center() + Vector2(0, 12), 86, Color("9a7ee8"))
-	var button_color := Color("8a5db6") if roulette_rolls_left > 0 and roulette_time <= 0.0 else Color("4c4160")
+	var can_roll := chosen_towers.size() == 3 and roulette_rolls_left > 0 and roulette_time <= 0.0
+	var button_color := Color("8a5db6") if can_roll else Color("4c4160")
 	draw_style_box(make_box(button_color, 10), Rect2(1480, 690, 300, 70))
-	draw_centered("ROLL (%d)" % roulette_rolls_left, Vector2(1630, 734), 24, Color.WHITE)
+	draw_centered("ROLL (%d)" % roulette_rolls_left if chosen_towers.size() == 3 else "ELIGE 3 TORRES", Vector2(1630, 734), 24 if chosen_towers.size() == 3 else 18, Color.WHITE)
 
 func draw_local_lightning() -> void:
 	draw_lightning_effects(Vector2(0, 270), lightning_effects)
