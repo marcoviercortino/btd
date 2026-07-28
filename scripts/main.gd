@@ -1665,6 +1665,15 @@ func make_box(color: Color, radius: float) -> StyleBoxFlat:
 	return box
 
 func draw_balloon(position: Vector2, balloon: Dictionary) -> void:
+	if balloon.get("regenerative", false):
+		var heart_radius := 13.0 + float(balloon.get("tier", 1)) * 2.0
+		if balloon.get("moab", false):
+			heart_radius = 42.0
+		elif balloon.get("armored", false) or balloon.get("magic_shield", false) or balloon.get("ceramic_shell", false):
+			heart_radius = 31.0
+		draw_regenerative_heart(position, balloon, heart_radius)
+		draw_camouflage_pattern(position, balloon, heart_radius)
+		return
 	if balloon.get("magic_shield", false):
 		var shield_ratio: float = float(balloon.get("shield_hp", 0)) / 32.0
 		draw_circle(position, 34, Color(0.30, 0.40, 1.0, 0.26))
