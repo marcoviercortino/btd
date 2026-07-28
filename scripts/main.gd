@@ -37,6 +37,8 @@ var projectiles: Array[Dictionary] = []
 var lightning_effects: Array[Dictionary] = []
 var sword_swipes: Array[Dictionary] = []
 var spikes: Array[Dictionary] = []
+var rival_sword_swipes: Array[Dictionary] = []
+var rival_spikes: Array[Dictionary] = []
 var bananas: Array[Dictionary] = []
 var rival_bananas: Array[Dictionary] = []
 var banana_popup_position := Vector2.ZERO
@@ -86,6 +88,7 @@ var roulette_display := -1
 var roulette_time := 0.0
 var roulette_tick := 0.0
 var roulette_rolls_left := 2
+var loadout_scroll_row := 0
 var money_popup_amount := 0
 var money_popup_time := 0.0
 var surrender_prompt := false
@@ -106,6 +109,15 @@ var result_sound_played := false
 var gameplay_speed := 1.0
 var local_speed_vote := 0
 var rival_speed_vote := 0
+var debug_mode := false
+var local_debug_vote := 0
+var rival_debug_vote := 0
+var debug_paused := false
+var local_pause_vote := 0
+var rival_pause_vote := 0
+var debug_wave_input := ""
+var outgoing_debug_wave := -1
+var pending_debug_wave := -1
 var map_select := false
 var selected_map_vote := -1
 var rival_map_vote := -1
@@ -161,10 +173,11 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 	game_sound.set_music("game")
-	var gameplay_delta := delta * gameplay_speed
+	var gameplay_delta := 0.0 if debug_paused else delta * gameplay_speed
 	update_wave(gameplay_delta)
 	update_online_wave_sync(gameplay_delta)
 	update_balloons(gameplay_delta)
+	update_regenerative_balloons(gameplay_delta)
 	update_banana_farms(gameplay_delta)
 	beneficios_timer += gameplay_delta
 	if beneficios_timer >= 5.0:
@@ -180,7 +193,7 @@ func _process(delta: float) -> void:
 		net_sync_timer -= delta
 		if net_sync_timer <= 0.0:
 			net_sync_timer = 0.10
-			rpc_update_rival.rpc(lives, money, beneficios, wave, towers, balloons, projectiles, lightning_effects, bananas, game_over)
+			rpc_update_rival.rpc(lives, money, beneficios, wave, towers, balloons, projectiles, lightning_effects, bananas, sword_swipes, spikes, game_over)
 	if wave_banner > 0.0:
 		wave_banner -= gameplay_delta
 	queue_redraw()
@@ -252,18 +265,25 @@ func rpc_begin_online_wave(next_wave: int) -> void:
 	start_wave_local()
 
 func spawn_balloon() -> void:
+	# Special balloon categories use only the top three levels available in a wave.
+	var regenerative := wave >= 12 and rng.randf() < minf(0.06 + (wave - 12) * 0.006, 0.18)
+	var camouflaged := wave >= 8 and rng.randf() < minf(0.07 + (wave - 8) * 0.008, 0.22)
+	if camouflaged or regenerative:
+		spawn_ranked_variant(camouflaged, regenerative)
+		return
+	camouflaged = false
 	if wave >= 28 and rng.randf() < minf(0.014 + (wave - 28) * 0.006, 0.07):
-		spawn_ceramic_nine_balloon()
+		spawn_ceramic_nine_balloon(0.0, camouflaged, regenerative)
 		return
 	if wave >= 25 and rng.randf() < minf(0.022 + (wave - 25) * 0.009, 0.10):
-		spawn_magic_shield_balloon()
+		spawn_magic_shield_balloon(0.0, camouflaged, regenerative)
 		return
 	if wave >= 23 and rng.randf() < minf(0.025 + (wave - 23) * 0.01, 0.12):
-		spawn_armored_balloon()
+		spawn_armored_balloon(0.0, camouflaged, regenerative)
 		return
 	# MOABs are effectively tier 10 threats: rare, late-game and never spammed.
 	if wave >= 34 and rng.randf() < minf(0.004 + (wave - 34) * 0.0015, 0.025):
-		spawn_moab()
+		spawn_moab(0.0, camouflaged, regenerative)
 		return
 	var tier := 1
 	if wave >= 3 and rng.randf() < minf(0.20 + wave * 0.025, 0.55):
@@ -282,9 +302,45 @@ func spawn_balloon() -> void:
 		tier = 8
 	if wave >= 24 and rng.randf() < minf(0.012 + (wave - 24) * 0.007, 0.075):
 		tier = 9
-	spawn_balloon_of_tier(tier)
+	spawn_balloon_of_tier(tier, 0.0, camouflaged, regenerative)
 
-func spawn_balloon_of_tier(tier: int, initial_distance := 0.0) -> void:
+func spawn_ranked_variant(camouflaged: bool, regenerative: bool) -> void:
+	var candidates: Array[float] = []
+	if wave >= 34:
+		# A MOAB is level 10; level 8 variants, level 9 balloons and the MOAB
+		# itself are valid camouflage candidates.
+		candidates = [8.0, 8.1, 8.2, 9.0, 9.5, 10.0]
+	elif wave >= 28:
+		# The ceramic shell is treated as level 9.5, so the lower bound is 8.
+		candidates = [8.0, 8.1, 8.2, 9.0, 9.5]
+	elif wave >= 24:
+		candidates = [7.0, 8.0, 8.1, 8.2, 9.0]
+	elif wave >= 21:
+		candidates = [6.0, 7.0, 8.0, 8.1]
+	elif wave >= 18:
+		candidates = [5.0, 6.0, 7.0]
+	elif wave >= 15:
+		candidates = [4.0, 5.0, 6.0]
+	elif wave >= 10:
+		candidates = [3.0, 4.0, 5.0]
+	else:
+		candidates = [2.0, 3.0, 4.0]
+	# MOABs can be camouflaged, but never regenerative.
+	if regenerative:
+		candidates.erase(10.0)
+	var selection: float = candidates[rng.randi_range(0, candidates.size() - 1)]
+	if is_equal_approx(selection, 10.0):
+		spawn_moab(0.0, camouflaged, regenerative)
+	elif is_equal_approx(selection, 9.5):
+		spawn_ceramic_nine_balloon(0.0, camouflaged, regenerative)
+	elif is_equal_approx(selection, 8.1):
+		spawn_armored_balloon(0.0, camouflaged, regenerative)
+	elif is_equal_approx(selection, 8.2):
+		spawn_magic_shield_balloon(0.0, camouflaged, regenerative)
+	else:
+		spawn_balloon_of_tier(int(selection), 0.0, camouflaged, regenerative)
+
+func spawn_balloon_of_tier(tier: int, initial_distance := 0.0, camouflaged := false, regenerative := false) -> void:
 	var hp := tier
 	var base_speed := 58.0 + wave * 4.0
 	var balloon_speed: float = base_speed + tier * 7.0
@@ -294,29 +350,29 @@ func spawn_balloon_of_tier(tier: int, initial_distance := 0.0) -> void:
 	var split_tiers: Array[int] = []
 	if tier == 9:
 		split_tiers = [8, 8, 8, 8, 7, 7]
-	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": base_speed, "speed": balloon_speed, "hp": hp, "max_hp": hp, "tier": tier, "moab": false, "split_on_destroy": split_level > 0 or not split_tiers.is_empty(), "split_level": split_level, "split_tiers": split_tiers, "leak_damage": tier, "radius": 24.0})
+	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": base_speed, "speed": balloon_speed, "hp": hp, "max_hp": hp, "tier": tier, "moab": false, "camouflaged": camouflaged, "regenerative": regenerative, "regen_start_tier": tier, "regen_cap": float(tier), "regen_since_hit": 0.0, "regen_tick": 0.0, "split_on_destroy": split_level > 0 or not split_tiers.is_empty(), "split_level": split_level, "split_tiers": split_tiers, "leak_damage": tier, "radius": 24.0})
 	next_balloon_id += 1
 
-func spawn_moab(initial_distance := 0.0) -> void:
+func spawn_moab(initial_distance := 0.0, camouflaged := false, regenerative := false) -> void:
 	var speed: float = 36.0 + wave * 1.1
-	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": speed, "speed": speed, "hp": 100, "max_hp": 100, "tier": 100, "moab": true, "moab_hp": 100, "moab_stage": 0, "leak_damage": 140, "radius": 43.0})
+	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": speed, "speed": speed, "hp": 100, "max_hp": 100, "tier": 100, "moab": true, "camouflaged": camouflaged, "regenerative": regenerative, "regen_start_tier": 10, "regen_cap": 10.0, "regen_since_hit": 0.0, "regen_tick": 0.0, "moab_hp": 100, "moab_stage": 0, "leak_damage": 140, "radius": 43.0})
 	next_balloon_id += 1
 
-func spawn_armored_balloon(initial_distance := 0.0) -> void:
+func spawn_armored_balloon(initial_distance := 0.0, camouflaged := false, regenerative := false) -> void:
 	var base_speed: float = 58.0 + wave * 4.0
 	var tier_two_speed: float = base_speed + 14.0
-	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": base_speed, "speed": tier_two_speed, "hp": 32, "max_hp": 32, "tier": 8, "moab": false, "armored": true, "armor_hp": 32, "leak_damage": 18, "radius": 35.0})
+	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": base_speed, "speed": tier_two_speed, "hp": 32, "max_hp": 32, "tier": 8, "moab": false, "camouflaged": camouflaged, "regenerative": regenerative, "regen_start_tier": 8, "regen_cap": 8.0, "regen_since_hit": 0.0, "regen_tick": 0.0, "armored": true, "armor_hp": 32, "leak_damage": 18, "radius": 35.0})
 	next_balloon_id += 1
 
-func spawn_magic_shield_balloon(initial_distance := 0.0) -> void:
+func spawn_magic_shield_balloon(initial_distance := 0.0, camouflaged := false, regenerative := false) -> void:
 	var base_speed: float = 58.0 + wave * 4.0
 	var tier_two_speed: float = base_speed + 14.0
-	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": base_speed, "speed": tier_two_speed, "hp": 32, "max_hp": 32, "tier": 8, "moab": false, "magic_shield": true, "shield_hp": 32, "leak_damage": 18, "radius": 35.0})
+	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": base_speed, "speed": tier_two_speed, "hp": 32, "max_hp": 32, "tier": 8, "moab": false, "camouflaged": camouflaged, "regenerative": regenerative, "regen_start_tier": 8, "regen_cap": 8.0, "regen_since_hit": 0.0, "regen_tick": 0.0, "magic_shield": true, "shield_hp": 32, "leak_damage": 18, "radius": 35.0})
 	next_balloon_id += 1
 
-func spawn_ceramic_nine_balloon(initial_distance := 0.0) -> void:
+func spawn_ceramic_nine_balloon(initial_distance := 0.0, camouflaged := false, regenerative := false) -> void:
 	var base_speed: float = 58.0 + wave * 4.0
-	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": base_speed, "speed": base_speed + 63.0, "hp": 13, "max_hp": 13, "tier": 9, "moab": false, "ceramic_shell": true, "shell_hp": 13, "shell_stage": 0, "leak_damage": 9, "radius": 36.0})
+	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": base_speed, "speed": base_speed + 63.0, "hp": 13, "max_hp": 13, "tier": 9, "moab": false, "camouflaged": camouflaged, "regenerative": regenerative, "regen_start_tier": 9, "regen_cap": 9.5, "regen_since_hit": 0.0, "regen_tick": 0.0, "ceramic_shell": true, "shell_hp": 13, "shell_stage": 0, "leak_damage": 9, "radius": 36.0})
 	next_balloon_id += 1
 
 func update_balloons(delta: float) -> void:
@@ -337,8 +393,58 @@ func update_balloons(delta: float) -> void:
 				lives = 0
 				game_over = true
 				if online_mode:
-					rpc_update_rival.rpc(lives, money, beneficios, wave, towers, balloons, projectiles, lightning_effects, bananas, true)
+					rpc_update_rival.rpc(lives, money, beneficios, wave, towers, balloons, projectiles, lightning_effects, bananas, sword_swipes, spikes, true)
 					rpc_report_defeat.rpc()
+
+func update_regenerative_balloons(delta: float) -> void:
+	for index in range(balloons.size() - 1, -1, -1):
+		var balloon: Dictionary = balloons[index]
+		if not balloon.get("regenerative", false):
+			continue
+		balloon.regen_since_hit = float(balloon.get("regen_since_hit", 0.0)) + delta
+		if balloon.regen_since_hit < 5.0:
+			continue
+		balloon.regen_tick = float(balloon.get("regen_tick", 0.0)) + delta
+		if balloon.regen_tick < 2.0:
+			continue
+		balloon.regen_tick = 0.0
+		regenerate_balloon(index)
+
+func regenerate_balloon(index: int) -> void:
+	if index < 0 or index >= balloons.size():
+		return
+	var balloon: Dictionary = balloons[index]
+	if balloon.get("moab", false):
+		balloon.moab_hp = mini(100, int(balloon.get("moab_hp", 100)) + 10)
+		balloon.hp = balloon.moab_hp
+		return
+	if balloon.get("armored", false):
+		balloon.armor_hp = mini(32, int(balloon.get("armor_hp", 32)) + 4)
+		balloon.hp = balloon.armor_hp
+		return
+	if balloon.get("magic_shield", false):
+		balloon.shield_hp = mini(32, int(balloon.get("shield_hp", 32)) + 4)
+		balloon.hp = balloon.shield_hp
+		return
+	if balloon.get("ceramic_shell", false):
+		balloon.shell_hp = mini(13, int(balloon.get("shell_hp", 13)) + 2)
+		balloon.hp = balloon.shell_hp
+		return
+	var cap: float = float(balloon.get("regen_cap", balloon.get("regen_start_tier", balloon.tier)))
+	if float(balloon.tier) < cap:
+		balloon.tier += 1
+		balloon.hp = balloon.tier
+		balloon.max_hp = balloon.tier
+		balloon.speed = balloon.base_speed + balloon.tier * 7.0
+		return
+	# A ceramic balloon whose shell was broken reforms it after recovering to
+	# its original level 9, then regains the 9.5 ceramic layer.
+	if is_equal_approx(cap, 9.5) and not balloon.get("ceramic_shell", false) and balloon.tier >= 9:
+		balloon.ceramic_shell = true
+		balloon.shell_hp = 13
+		balloon.shell_stage = 0
+		balloon.hp = 13
+		balloon.max_hp = 13
 
 func update_rival_prediction(delta: float) -> void:
 	# The opponent sends snapshots; advance balloons and homing darts locally between packets.
@@ -368,6 +474,10 @@ func update_rival_prediction(delta: float) -> void:
 		var movement: Vector2 = dart.position - previous_position
 		if movement.length_squared() > 0.01:
 			dart.direction = movement.normalized()
+	for index in range(rival_sword_swipes.size() - 1, -1, -1):
+		rival_sword_swipes[index].time -= delta
+		if rival_sword_swipes[index].time <= 0.0:
+			rival_sword_swipes.remove_at(index)
 
 func update_towers(delta: float) -> void:
 	for tower_index in range(towers.size()):
@@ -421,6 +531,8 @@ func choose_tower_target(tower: Dictionary) -> int:
 	var mode: int = int(tower.get("target_mode", 0))
 	var chosen_index := -1
 	for index in range(balloons.size()):
+		if balloons[index].get("camouflaged", false) and not bool(tower.get("thermal_vision", false)):
+			continue
 		var balloon_position := point_on_path(balloons[index].distance)
 		var target_distance: float = tower.position.distance_to(balloon_position)
 		var can_mark: bool = target_distance <= float(tower.range)
@@ -487,6 +599,8 @@ func cast_chain_lightning(origin: Vector2, first_target: int, owner_index: int) 
 		var origin_point := chain_points[chain_points.size() - 1]
 		for i in balloons.size():
 			if i in used:
+				continue
+			if balloons[i].get("camouflaged", false) and not tower_has_thermal_vision(owner_index):
 				continue
 			var candidate := point_on_path(balloons[i].distance)
 			var candidate_distance := origin_point.distance_to(candidate)
@@ -572,6 +686,11 @@ func update_projectiles(delta: float) -> void:
 func damage_balloon(index: int, damage: int, damage_type := "physical", owner_index := -1) -> void:
 	if index < 0 or index >= balloons.size():
 		return
+	if balloons[index].get("camouflaged", false) and not tower_has_thermal_vision(owner_index):
+		return
+	if balloons[index].get("regenerative", false):
+		balloons[index].regen_since_hit = 0.0
+		balloons[index].regen_tick = 0.0
 	if balloons[index].get("moab", false):
 		var old_moab_hp: int = int(balloons[index].moab_hp)
 		var new_moab_hp: int = max(0, old_moab_hp - damage)
@@ -646,17 +765,19 @@ func damage_balloon(index: int, damage: int, damage_type := "physical", owner_in
 			balloons[index].speed = balloons[index].base_speed + balloons[index].tier * 7.0
 		return
 	var destroyed_distance: float = balloons[index].distance
+	var was_camouflaged: bool = balloons[index].get("camouflaged", false)
+	var was_regenerative: bool = balloons[index].get("regenerative", false)
 	var splits_into_two: bool = balloons[index].get("split_on_destroy", false)
 	var split_level: int = int(balloons[index].get("split_level", 5))
 	var split_tiers: Array = balloons[index].get("split_tiers", [])
 	balloons.remove_at(index)
 	if splits_into_two:
 		if split_tiers.is_empty():
-			spawn_balloon_of_tier(split_level, destroyed_distance - 12.0)
-			spawn_balloon_of_tier(split_level, destroyed_distance + 12.0)
+			spawn_balloon_of_tier(split_level, destroyed_distance - 12.0, was_camouflaged, was_regenerative)
+			spawn_balloon_of_tier(split_level, destroyed_distance + 12.0, was_camouflaged, was_regenerative)
 		else:
 			for split_index in range(split_tiers.size()):
-				spawn_balloon_of_tier(int(split_tiers[split_index]), destroyed_distance + (split_index - 2.5) * 16.0)
+				spawn_balloon_of_tier(int(split_tiers[split_index]), destroyed_distance + (split_index - 2.5) * 16.0, was_camouflaged, was_regenerative)
 	for other in projectiles:
 		if other.target > index:
 			other.target -= 1
@@ -668,41 +789,50 @@ func record_tower_damage(owner_index: int, amount: int, destroyed: bool) -> void
 	if destroyed:
 		towers[owner_index].bloons_popped = int(towers[owner_index].get("bloons_popped", 0)) + 1
 
+func tower_has_thermal_vision(owner_index: int) -> bool:
+	return owner_index >= 0 and owner_index < towers.size() and bool(towers[owner_index].get("thermal_vision", false))
+
 func destroy_armored_balloon(index: int) -> void:
 	if index < 0 or index >= balloons.size():
 		return
 	var destroyed_distance: float = balloons[index].distance
+	var was_camouflaged: bool = balloons[index].get("camouflaged", false)
+	var was_regenerative: bool = balloons[index].get("regenerative", false)
 	balloons.remove_at(index)
 	for other in projectiles:
 		if other.target > index:
 			other.target -= 1
 	for split_index in range(3):
-		spawn_balloon_of_tier(7, destroyed_distance + (split_index - 1) * 18.0)
+		spawn_balloon_of_tier(7, destroyed_distance + (split_index - 1) * 18.0, was_camouflaged, was_regenerative)
 
 func destroy_magic_shield_balloon(index: int) -> void:
 	if index < 0 or index >= balloons.size():
 		return
 	var destroyed_distance: float = balloons[index].distance
+	var was_camouflaged: bool = balloons[index].get("camouflaged", false)
+	var was_regenerative: bool = balloons[index].get("regenerative", false)
 	balloons.remove_at(index)
 	for other in projectiles:
 		if other.target > index:
 			other.target -= 1
 	for split_index in range(3):
-		spawn_balloon_of_tier(7, destroyed_distance + (split_index - 1) * 18.0)
+		spawn_balloon_of_tier(7, destroyed_distance + (split_index - 1) * 18.0, was_camouflaged, was_regenerative)
 
 func destroy_moab(index: int) -> void:
 	if index < 0 or index >= balloons.size():
 		return
 	var destroyed_distance: float = balloons[index].distance
+	var was_camouflaged: bool = balloons[index].get("camouflaged", false)
+	var was_regenerative: bool = balloons[index].get("regenerative", false)
 	balloons.remove_at(index)
 	for other in projectiles:
 		if other.target > index:
 			other.target -= 1
 	for split_index in range(6):
-		spawn_ceramic_nine_balloon(destroyed_distance + (split_index - 2.5) * 18.0)
+		spawn_ceramic_nine_balloon(destroyed_distance + (split_index - 2.5) * 18.0, was_camouflaged, was_regenerative)
 	for split_index in range(2):
-		spawn_armored_balloon(destroyed_distance + (split_index + 4) * 20.0)
-		spawn_magic_shield_balloon(destroyed_distance - (split_index + 4) * 20.0)
+		spawn_armored_balloon(destroyed_distance + (split_index + 4) * 20.0, was_camouflaged, was_regenerative)
+		spawn_magic_shield_balloon(destroyed_distance - (split_index + 4) * 20.0, was_camouflaged, was_regenerative)
 
 func point_on_path(distance: float) -> Vector2:
 	var remaining := distance
@@ -758,6 +888,19 @@ func _input(event: InputEvent) -> void:
 				online_lobby = true
 			queue_redraw()
 		return
+	if event is InputEventKey and event.pressed and online_mode and editing_field == "debug_wave":
+		if event.keycode == KEY_BACKSPACE:
+			debug_wave_input = debug_wave_input.left(-1)
+		elif event.ctrl_pressed and event.keycode == KEY_V:
+			for character in DisplayServer.clipboard_get():
+				if character.is_valid_int() and debug_wave_input.length() < 2:
+					debug_wave_input += character
+		elif event.unicode > 0:
+			var typed_debug := char(event.unicode)
+			if typed_debug.is_valid_int() and debug_wave_input.length() < 2:
+				debug_wave_input += typed_debug
+		queue_redraw()
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_ESCAPE and online_mode:
 			surrender_prompt = not surrender_prompt
@@ -775,6 +918,26 @@ func _input(event: InputEvent) -> void:
 			get_tree().reload_current_scene()
 			return
 		if online_mode:
+			if Rect2(1600, 215, 120, 38).has_point(mouse):
+				set_requested_debug_mode()
+				return
+			if debug_mode:
+				if Rect2(1460, 315, 180, 50).has_point(mouse):
+					request_debug_pause_toggle()
+					return
+				if Rect2(1460, 385, 130, 50).has_point(mouse):
+					editing_field = "debug_wave"
+					return
+				if Rect2(1605, 385, 160, 50).has_point(mouse):
+					request_debug_wave(debug_wave_input.to_int())
+					return
+				if pending_debug_wave >= 0:
+					if Rect2(1460, 475, 140, 50).has_point(mouse):
+						respond_debug_wave(true)
+						return
+					if Rect2(1615, 475, 150, 50).has_point(mouse):
+						respond_debug_wave(false)
+						return
 			if Rect2(1740, 215, 120, 38).has_point(mouse):
 				set_requested_game_speed(1.0 if gameplay_speed >= 2.0 else 2.0)
 				return
@@ -883,7 +1046,7 @@ func place_tower_local(position: Vector2, tower_kind: int) -> void:
 		"damage": config.damage, "damage_type": config.damage_type,
 		"reload": config.reload,
 		"projectile_speed": config.projectile_speed,
-		"projectile_range": config.projectile_range,
+		"projectile_range": config.projectile_range, "thermal_vision": config.thermal_vision,
 		"cooldown": 0.0, "banana_timer": 0.0, "target_mode": 0, "damage_dealt": 0, "bloons_popped": 0, "color": TOWER_COLORS[tower_kind], "type": tower_kind, "cost": TOWER_COSTS[tower_kind]
 	})
 	if multiplayer_mode:
@@ -1000,7 +1163,7 @@ func sell_inspected_tower() -> void:
 	money += refund
 	towers.remove_at(inspected_tower_index)
 	inspected_tower_index = -1
-	game_sound.play_effect("click", -10.0)
+	game_sound.play_money_effect()
 
 func change_inspected_target_mode(direction: int) -> void:
 	if inspected_tower_index < 0 or inspected_tower_index >= towers.size():
@@ -1073,8 +1236,141 @@ func rpc_set_game_speed(new_speed: float) -> void:
 	local_speed_vote = 0
 	rival_speed_vote = 0
 
+func set_requested_debug_mode() -> void:
+	var target_vote := 2 if debug_mode else 1
+	local_debug_vote = target_vote
+	if multiplayer.is_server():
+		rpc_show_rival_debug_vote.rpc(target_vote)
+		try_apply_debug_vote()
+	else:
+		rpc_request_debug_vote.rpc_id(1, target_vote)
+
+@rpc("any_peer", "reliable")
+func rpc_request_debug_vote(target_vote: int) -> void:
+	if multiplayer.is_server():
+		rival_debug_vote = clampi(target_vote, 1, 2)
+		try_apply_debug_vote()
+
+@rpc("any_peer", "reliable")
+func rpc_show_rival_debug_vote(target_vote: int) -> void:
+	rival_debug_vote = clampi(target_vote, 1, 2)
+
+func try_apply_debug_vote() -> void:
+	if multiplayer.is_server() and local_debug_vote > 0 and local_debug_vote == rival_debug_vote:
+		rpc_set_debug_mode.rpc(local_debug_vote == 1)
+
+@rpc("any_peer", "call_local", "reliable")
+func rpc_set_debug_mode(enabled: bool) -> void:
+	debug_mode = enabled
+	debug_paused = false
+	local_debug_vote = 0
+	rival_debug_vote = 0
+	local_pause_vote = 0
+	rival_pause_vote = 0
+	debug_wave_input = ""
+	editing_field = ""
+
+func request_debug_pause_toggle() -> void:
+	if not debug_mode:
+		return
+	var target_vote := 2 if debug_paused else 1
+	local_pause_vote = target_vote
+	if multiplayer.is_server():
+		rpc_show_rival_pause_vote.rpc(target_vote)
+		try_apply_pause_vote()
+	else:
+		rpc_request_pause_vote.rpc_id(1, target_vote)
+
+@rpc("any_peer", "reliable")
+func rpc_request_pause_vote(target_vote: int) -> void:
+	if multiplayer.is_server():
+		rival_pause_vote = clampi(target_vote, 1, 2)
+		try_apply_pause_vote()
+
+@rpc("any_peer", "reliable")
+func rpc_show_rival_pause_vote(target_vote: int) -> void:
+	rival_pause_vote = clampi(target_vote, 1, 2)
+
+func try_apply_pause_vote() -> void:
+	if multiplayer.is_server() and local_pause_vote > 0 and local_pause_vote == rival_pause_vote:
+		rpc_set_debug_pause.rpc(local_pause_vote == 1)
+
+@rpc("any_peer", "call_local", "reliable")
+func rpc_set_debug_pause(paused: bool) -> void:
+	debug_paused = paused
+	local_pause_vote = 0
+	rival_pause_vote = 0
+	if game_sound:
+		game_sound.play_debug_effect("pause" if paused else "resume")
+
+func request_debug_wave(target_wave: int) -> void:
+	if not debug_mode or target_wave < 1 or target_wave > 99 or outgoing_debug_wave >= 0 or pending_debug_wave >= 0:
+		return
+	outgoing_debug_wave = target_wave
+	if multiplayer.is_server():
+		rpc_show_debug_wave_request.rpc(target_wave)
+	else:
+		rpc_request_debug_wave.rpc_id(1, target_wave)
+
+@rpc("any_peer", "reliable")
+func rpc_request_debug_wave(target_wave: int) -> void:
+	if multiplayer.is_server() and debug_mode:
+		pending_debug_wave = clampi(target_wave, 1, 99)
+
+@rpc("any_peer", "reliable")
+func rpc_show_debug_wave_request(target_wave: int) -> void:
+	pending_debug_wave = clampi(target_wave, 1, 99)
+
+func respond_debug_wave(accepted: bool) -> void:
+	if pending_debug_wave < 0:
+		return
+	var target_wave := pending_debug_wave
+	if multiplayer.is_server():
+		if accepted:
+			rpc_apply_debug_wave.rpc(target_wave)
+		else:
+			rpc_clear_debug_wave_request.rpc()
+	else:
+		rpc_answer_debug_wave.rpc_id(1, target_wave, accepted)
+
+@rpc("any_peer", "reliable")
+func rpc_answer_debug_wave(target_wave: int, accepted: bool) -> void:
+	if not multiplayer.is_server():
+		return
+	if accepted:
+		rpc_apply_debug_wave.rpc(clampi(target_wave, 1, 99))
+	else:
+		rpc_clear_debug_wave_request.rpc()
+
+@rpc("any_peer", "call_local", "reliable")
+func rpc_apply_debug_wave(target_wave: int) -> void:
+	wave = clampi(target_wave, 1, 99) - 1
+	wave_active = false
+	spawn_left = 0
+	spawn_timer = 0.0
+	balloons.clear()
+	projectiles.clear()
+	lightning_effects.clear()
+	sword_swipes.clear()
+	spikes.clear()
+	local_wave_finished = false
+	rival_wave_finished = false
+	online_wave_start_timer = -1.0
+	outgoing_debug_wave = -1
+	pending_debug_wave = -1
+	debug_wave_input = ""
+	editing_field = ""
+	if game_sound:
+		game_sound.play_debug_effect("wave_jump")
+	start_wave_local()
+
+@rpc("any_peer", "call_local", "reliable")
+func rpc_clear_debug_wave_request() -> void:
+	outgoing_debug_wave = -1
+	pending_debug_wave = -1
+
 @rpc("any_peer", "unreliable")
-func rpc_update_rival(remote_lives: int, remote_money: int, remote_beneficios: int, remote_wave: int, remote_towers: Array, remote_balloons: Array, remote_projectiles_data: Array, remote_lightning: Array, remote_bananas_data: Array, remote_lost: bool) -> void:
+func rpc_update_rival(remote_lives: int, remote_money: int, remote_beneficios: int, remote_wave: int, remote_towers: Array, remote_balloons: Array, remote_projectiles_data: Array, remote_lightning: Array, remote_bananas_data: Array, remote_swipes: Array, remote_spikes_data: Array, remote_lost: bool) -> void:
 	rival_lives = remote_lives
 	rival_money = remote_money
 	rival_beneficios = remote_beneficios
@@ -1089,6 +1385,8 @@ func rpc_update_rival(remote_lives: int, remote_money: int, remote_beneficios: i
 	for remote_banana in remote_bananas_data:
 		if not remote_banana.get("collecting", false):
 			rival_bananas.append(remote_banana)
+	rival_sword_swipes = remote_swipes
+	rival_spikes = remote_spikes_data
 	rival_defeated = remote_lost
 	if remote_lost and not game_over:
 		won = true
@@ -1106,7 +1404,7 @@ func rpc_place_rival_tower(position: Vector2, tower_kind: int) -> void:
 		"damage": config.damage, "damage_type": config.damage_type,
 		"reload": config.reload,
 		"projectile_speed": config.projectile_speed,
-		"projectile_range": config.projectile_range,
+		"projectile_range": config.projectile_range, "thermal_vision": config.thermal_vision,
 		"cooldown": 0.0, "banana_timer": 0.0, "target_mode": 0, "color": TOWER_COLORS[tower_kind], "type": tower_kind
 	})
 
@@ -1207,6 +1505,8 @@ func draw_balloon(position: Vector2, balloon: Dictionary) -> void:
 		draw_arc(position, 29, 0.0, TAU, 24, Color("b8b5ff"), 3.0)
 		draw_rect(Rect2(position + Vector2(-28, -40), Vector2(56, 6)), Color("263544"))
 		draw_rect(Rect2(position + Vector2(-28, -40), Vector2(56 * shield_ratio, 6)), Color("b9a7ff"))
+		draw_regenerative_heart(position, balloon, 24.0)
+		draw_camouflage_pattern(position, balloon, 30.0)
 		return
 	if balloon.get("armored", false):
 		var armor_ratio: float = float(balloon.get("armor_hp", 0)) / 32.0
@@ -1216,6 +1516,8 @@ func draw_balloon(position: Vector2, balloon: Dictionary) -> void:
 		draw_line(position + Vector2(-18, 10), position + Vector2(18, -10), Color("c9d8df"), 4.0)
 		draw_rect(Rect2(position + Vector2(-28, -38), Vector2(56, 6)), Color("263544"))
 		draw_rect(Rect2(position + Vector2(-28, -38), Vector2(56 * armor_ratio, 6)), Color("b7d9e6"))
+		draw_regenerative_heart(position, balloon, 24.0)
+		draw_camouflage_pattern(position, balloon, 29.0)
 		return
 	if balloon.get("moab", false):
 		var integrity := float(balloon.get("moab_hp", 100)) / 100.0
@@ -1223,6 +1525,8 @@ func draw_balloon(position: Vector2, balloon: Dictionary) -> void:
 		var moab_texture = MOAB_TEXTURE if moab_stage == 0 else MOAB_DAMAGED_TEXTURE if moab_stage == 1 else MOAB_BROKEN_TEXTURE
 		draw_texture_rect(moab_texture, Rect2(position - Vector2(52, 35), Vector2(104, 70)), false, Color(1.0, 1.0, 1.0, 0.55 + integrity * 0.45))
 		draw_rect(Rect2(position + Vector2(-32, -15), Vector2(64 * integrity, 6)), Color("d9f4ff"))
+		draw_regenerative_heart(position, balloon, 34.0)
+		draw_camouflage_pattern(position, balloon, 42.0)
 		return
 	# Index 0 is unused so a balloon's tier maps directly to its colour.
 	var colors := [Color("ef5e62"), Color("478fe4"), Color("f5d35d"), Color("a97cdd"), Color("7bd4bf"), Color("ee8f54"), Color("773b68"), Color("f5f7ff"), Color("33435f"), Color("f09fdb")]
@@ -1244,6 +1548,30 @@ func draw_balloon(position: Vector2, balloon: Dictionary) -> void:
 		if shell_stage >= 2:
 			draw_line(position + Vector2(25, -18), position + Vector2(5, 19), Color(0.35, 0.27, 0.23, shell_alpha), 3.0)
 	draw_line(position + Vector2(0, 13), position + Vector2(0, 25), Color.WHITE, 1.5)
+	draw_regenerative_heart(position, balloon, 13.0 + balloon.tier * 2.0)
+	draw_camouflage_pattern(position, balloon, 14.0 + balloon.tier * 2.0)
+
+func draw_camouflage_pattern(position: Vector2, balloon: Dictionary, radius: float) -> void:
+	if not balloon.get("camouflaged", false):
+		return
+	# Keeps the base balloon recognisable while making camouflage obvious.
+	draw_arc(position, radius + 3.0, 0.0, TAU, 20, Color(0.12, 0.20, 0.14, 0.58), 2.0)
+	draw_circle(position + Vector2(-radius * 0.34, -radius * 0.22), radius * 0.25, Color(0.26, 0.38, 0.20, 0.43))
+	draw_circle(position + Vector2(radius * 0.28, -radius * 0.05), radius * 0.20, Color(0.55, 0.48, 0.27, 0.45))
+	draw_circle(position + Vector2(-radius * 0.05, radius * 0.31), radius * 0.18, Color(0.16, 0.29, 0.20, 0.46))
+
+func draw_regenerative_heart(position: Vector2, balloon: Dictionary, radius: float) -> void:
+	if not balloon.get("regenerative", false):
+		return
+	var heart_color := Color("ff5f83")
+	var outline := Color("7c2542")
+	draw_circle(position + Vector2(-radius * 0.28, -radius * 0.18), radius * 0.34, outline)
+	draw_circle(position + Vector2(radius * 0.28, -radius * 0.18), radius * 0.34, outline)
+	draw_colored_polygon(PackedVector2Array([position + Vector2(-radius * 0.60, -radius * 0.10), position + Vector2(radius * 0.60, -radius * 0.10), position + Vector2(0, radius * 0.72)]), outline)
+	draw_circle(position + Vector2(-radius * 0.28, -radius * 0.18), radius * 0.27, heart_color)
+	draw_circle(position + Vector2(radius * 0.28, -radius * 0.18), radius * 0.27, heart_color)
+	draw_colored_polygon(PackedVector2Array([position + Vector2(-radius * 0.48, -radius * 0.10), position + Vector2(radius * 0.48, -radius * 0.10), position + Vector2(0, radius * 0.57)]), heart_color)
+	draw_circle(position + Vector2(-radius * 0.18, -radius * 0.30), radius * 0.07, Color.WHITE)
 
 func draw_centered(text_value: String, center: Vector2, size: int, color: Color) -> void:
 	var font := ThemeDB.fallback_font
@@ -1400,6 +1728,8 @@ func draw_online_duel() -> void:
 	draw_rival_bananas()
 	draw_local_lightning()
 	draw_remote_lightning()
+	draw_sword_swipes(Vector2(960, 270), Vector2(0.75, 0.75), rival_sword_swipes)
+	draw_spikes_at(Vector2(960, 270), rival_spikes)
 	draw_placement_preview()
 	draw_inspected_tower_highlight()
 	draw_rect(Rect2(956, 0, 8, HEIGHT), Color("f4d66d"))
@@ -1424,6 +1754,8 @@ func draw_online_duel() -> void:
 	draw_string(font, Vector2(1230, 126), "VIDAS %d  ·  OLEADA %d" % [rival_lives, rival_wave], HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
 	draw_rect(Rect2(1230, 178, 610, 18), Color("263544"))
 	draw_rect(Rect2(1230, 178, 610.0 * rival_lives / 150.0, 18), Color("ef7676"))
+	draw_style_box(make_box(Color("8a5db6") if debug_mode else Color("294a60"), 9), Rect2(1600, 215, 120, 38))
+	draw_centered("DEBUG" + (" ✓" if debug_mode else ""), Vector2(1660, 242), 17, Color.WHITE)
 	draw_style_box(make_box(Color("b56c38") if gameplay_speed >= 2.0 else Color("294a60"), 9), Rect2(1740, 215, 120, 38))
 	draw_centered("×2" if gameplay_speed < 2.0 else "×2 ✓", Vector2(1800, 242), 22, Color.WHITE)
 	if online_mode and rival_speed_vote > 0:
@@ -1432,6 +1764,17 @@ func draw_online_duel() -> void:
 	elif online_mode and local_speed_vote > 0:
 		draw_style_box(make_box(Color("31546c"), 9), Rect2(1360, 215, 360, 38))
 		draw_centered("ESPERANDO AL RIVAL PARA %s" % ("×2" if local_speed_vote == 2 else "×1"), Vector2(1540, 242), 16, Color.WHITE)
+	if rival_debug_vote > 0:
+		draw_style_box(make_box(Color("76543a"), 9), Rect2(1360, 258, 500, 34))
+		draw_centered("EL RIVAL QUIERE %s EL MODO DEBUG" % ("ACTIVAR" if rival_debug_vote == 1 else "DESACTIVAR"), Vector2(1610, 281), 15, Color.WHITE)
+	elif local_debug_vote > 0:
+		draw_style_box(make_box(Color("31546c"), 9), Rect2(1360, 258, 500, 34))
+		draw_centered("ESPERANDO AL RIVAL PARA %s DEBUG" % ("ACTIVAR" if local_debug_vote == 1 else "DESACTIVAR"), Vector2(1610, 281), 15, Color.WHITE)
+	if debug_mode:
+		draw_debug_controls(font)
+	if debug_paused:
+		draw_style_box(make_box(Color(0.20, 0.09, 0.32, 0.92), 12), Rect2(690, 450, 540, 100))
+		draw_centered("PARTIDA PAUSADA · MODO DEBUG", Vector2(960, 510), 28, Color("f4d66d"))
 	draw_duel_tabs(font)
 	if active_duel_tab == 0:
 		var available := match_towers()
@@ -1455,6 +1798,31 @@ func draw_online_duel() -> void:
 		draw_rect(Rect2(0, 0, WIDTH, HEIGHT), Color(0.03, 0.08, 0.13, 0.78))
 		draw_centered("¡GANASTE EL DUELO!" if won else "TU FRENTE CAYO", Vector2(960, 500), 56, Color("f8d36a") if won else Color("ff8d8d"))
 		draw_centered("Haz clic para volver a empezar", Vector2(960, 570), 28, Color.WHITE)
+
+func draw_debug_controls(font: Font) -> void:
+	var panel := Rect2(1430, 300, 390, 250)
+	draw_style_box(make_box(Color(0.10, 0.08, 0.20, 0.96), 12), panel)
+	draw_string(font, panel.position + Vector2(22, 31), "MODO DEBUG", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color("d8b9ff"))
+	var pause_color := Color("c27a46") if not debug_paused else Color("4b9b78")
+	draw_style_box(make_box(pause_color, 9), Rect2(1460, 315, 180, 50))
+	draw_centered("PAUSAR" if not debug_paused else "REANUDAR", Vector2(1550, 347), 17, Color.WHITE)
+	if rival_pause_vote > 0:
+		draw_string(font, Vector2(1655, 348), "Rival: %s" % ("pausar" if rival_pause_vote == 1 else "reanudar"), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("f4d66d"))
+	elif local_pause_vote > 0:
+		draw_string(font, Vector2(1655, 348), "Esperando rival", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("bdd1de"))
+	draw_string(font, Vector2(1460, 378), "Avanzar a oleada", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("d9eef4"))
+	draw_style_box(make_box(Color("31546c") if editing_field == "debug_wave" else Color("294a60"), 8), Rect2(1460, 385, 130, 50))
+	draw_string(font, Vector2(1476, 417), debug_wave_input + ("|" if editing_field == "debug_wave" else ""), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color.WHITE)
+	draw_style_box(make_box(Color("4b7d9e") if debug_wave_input.to_int() >= 1 else Color("355b70"), 8), Rect2(1605, 385, 160, 50))
+	draw_centered("AVANZAR", Vector2(1685, 417), 16, Color.WHITE)
+	if outgoing_debug_wave >= 0:
+		draw_string(font, Vector2(1460, 460), "Esperando respuesta: oleada %d" % outgoing_debug_wave, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("f4d66d"))
+	if pending_debug_wave >= 0:
+		draw_string(font, Vector2(1460, 460), "¿Avanzar a la oleada %d?" % pending_debug_wave, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
+		draw_style_box(make_box(Color("4b9b78"), 8), Rect2(1460, 475, 140, 50))
+		draw_style_box(make_box(Color("a3424d"), 8), Rect2(1615, 475, 150, 50))
+		draw_centered("ACEPTAR", Vector2(1530, 507), 15, Color.WHITE)
+		draw_centered("RECHAZAR", Vector2(1690, 507), 15, Color.WHITE)
 
 func draw_duel_arena(origin: Vector2, arena_towers: Array, arena_balloons: Array, arena_projectiles: Array) -> void:
 	draw_set_transform(origin, 0.0, Vector2(0.75, 0.75))
@@ -1481,11 +1849,11 @@ func draw_dart(position: Vector2, color: Color, direction: Vector2, kind := 0) -
 	draw_line(tail, tip, color, 2.5)
 	draw_circle(tip, 3.5, Color.WHITE)
 
-func draw_sword_swipes(origin: Vector2, scale: Vector2) -> void:
-	if sword_swipes.is_empty():
+func draw_sword_swipes(origin: Vector2, scale: Vector2, swipe_list := sword_swipes) -> void:
+	if swipe_list.is_empty():
 		return
 	draw_set_transform(origin, 0.0, scale)
-	for swipe in sword_swipes:
+	for swipe in swipe_list:
 		var alpha: float = clampf(float(swipe.time) / 0.32, 0.0, 1.0)
 		draw_arc(swipe.position, 90.0, swipe.angle - PI * 0.5, swipe.angle + PI * 0.5, 22, Color(1.0, 0.88, 0.55, alpha), 8.0)
 		draw_arc(swipe.position, 76.0, swipe.angle - PI * 0.5, swipe.angle + PI * 0.5, 22, Color(1.0, 1.0, 1.0, alpha), 2.5)
@@ -1496,6 +1864,11 @@ func draw_spikes(spike_list: Array) -> void:
 		var point: Vector2 = spike.position
 		draw_colored_polygon(PackedVector2Array([point + Vector2(-7, 6), point + Vector2(0, -8), point + Vector2(7, 6)]), Color("dbe8ed"))
 		draw_polyline(PackedVector2Array([point + Vector2(-7, 6), point + Vector2(0, -8), point + Vector2(7, 6)]), Color("415260"), 2.0)
+
+func draw_spikes_at(origin: Vector2, spike_list: Array) -> void:
+	draw_set_transform(origin, 0.0, Vector2(0.75, 0.75))
+	draw_spikes(spike_list)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 func draw_bananas() -> void:
 	draw_banana_group(Vector2(0, 270), bananas)
@@ -1773,6 +2146,7 @@ func open_loadout_select(is_online: bool) -> void:
 	roulette_display = -1
 	roulette_time = 0.0
 	roulette_rolls_left = 2
+	loadout_scroll_row = 0
 	loadout_ready = false
 	rival_ready = false
 
@@ -1781,6 +2155,15 @@ func handle_loadout_input(event: InputEvent) -> void:
 		loadout_select = false
 		online_lobby = online_mode
 		return
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			loadout_scroll_row = max(0, loadout_scroll_row - 1)
+			queue_redraw()
+			return
+		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			loadout_scroll_row = mini(loadout_max_scroll_row(), loadout_scroll_row + 1)
+			queue_redraw()
+			return
 	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
 		return
 	var design_position: Vector2 = event.position
@@ -1872,6 +2255,8 @@ func draw_loadout_select() -> void:
 	var font := ThemeDB.fallback_font
 	for kind in range(TOWER_NAMES.size()):
 		var rect := loadout_card_rect(kind)
+		if not Rect2(40, 270, 1360, 535).intersects(rect):
+			continue
 		var selected := kind in chosen_towers
 		draw_style_box(make_box(Color("31546c") if selected else Color("1d4055"), 16), rect)
 		draw_texture_rect(tower_texture_for(kind), Rect2(rect.position + Vector2(24, 30), Vector2(125, 125)), false)
@@ -1879,6 +2264,11 @@ func draw_loadout_select() -> void:
 		draw_string(font, rect.position + Vector2(160, 112), "$ %d" % TOWER_COSTS[kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("ffd76a"))
 		draw_string(font, rect.position + Vector2(24, 190), "Daño %d · Recarga %.2f s" % [tower_config(kind).damage, tower_config(kind).reload], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("d9eef4"))
 		draw_string(font, rect.position + Vector2(24, 220), "Alcance %d" % tower_config(kind).range, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("bdd1de"))
+	if loadout_max_scroll_row() > 0:
+		draw_style_box(make_box(Color("294a60"), 9), Rect2(1822, 430, 60, 116))
+		draw_centered("▲", Vector2(1852, 460), 20, Color.WHITE)
+		draw_centered("▼", Vector2(1852, 505), 20, Color.WHITE)
+		draw_string(font, Vector2(1827, 534), "Rueda", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("bdd1de"))
 	draw_random_slot(font)
 	var ready_color := Color("4bba83") if chosen_towers.size() == 3 and random_tower >= 0 else Color("355b70")
 	draw_style_box(make_box(ready_color, 12), Rect2(760, 865, 400, 76))
@@ -1892,7 +2282,11 @@ func draw_loadout_select() -> void:
 func loadout_card_rect(kind: int) -> Rect2:
 	var column: int = kind % 4
 	var row: int = kind / 4
-	return Rect2(45 + column * 345, 285 + row * 275, 310, 240)
+	return Rect2(45 + column * 345, 285 + (row - loadout_scroll_row) * 275, 310, 240)
+
+func loadout_max_scroll_row() -> int:
+	var rows := int(ceili(float(TOWER_NAMES.size()) / 4.0))
+	return max(0, rows - 2)
 
 func draw_random_slot(font: Font) -> void:
 	var rect := Rect2(1430, 350, 390, 290)
@@ -1985,6 +2379,7 @@ func draw_inspected_tower_menu() -> void:
 	var panel := Rect2(970, 760, 540, 270)
 	draw_style_box(make_box(Color(0.06, 0.14, 0.20, 0.97), 14), panel)
 	draw_texture_rect(tower_texture_for(kind), Rect2(995, 790, 88, 88), false)
+	draw_string(font, panel.position + Vector2(125, 110), "Visión térmica: %s" % ("SÍ" if tower.get("thermal_vision", false) else "NO"), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("f4d66d") if tower.get("thermal_vision", false) else Color("9ebfcf"))
 	draw_string(font, Vector2(1100, 810), TOWER_NAMES[kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 25, Color.WHITE)
 	draw_string(font, Vector2(1100, 842), "Daño %d · Alcance %d" % [tower.damage, tower.range], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("bdd1de"))
 	if kind != 5 and kind != 6 and kind != 8:
@@ -2011,7 +2406,7 @@ func draw_inspected_tower_menu() -> void:
 func draw_tower_tooltip() -> void:
 	if hover_tower < 0:
 		return
-	var rect := Rect2(970, 850, 480, 150)
+	var rect := Rect2(970, 850, 480, 180)
 	draw_style_box(make_box(Color(0.07, 0.14, 0.20, 0.96), 12), rect)
 	var font := ThemeDB.fallback_font
 	var config := tower_config(hover_tower)
@@ -2022,6 +2417,7 @@ func draw_tower_tooltip() -> void:
 	draw_string(font, rect.position + Vector2(20, 67), "Coste: $ %d   ·   Daño: %d" % [TOWER_COSTS[hover_tower], damage], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
 	draw_string(font, rect.position + Vector2(20, 96), "Velocidad de ataque: %s" % attack_speed, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
 	draw_string(font, rect.position + Vector2(20, 125), "Alcance: %s" % range_value, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color("bdd1de"))
+	draw_string(font, rect.position + Vector2(20, 154), "Visión térmica: %s" % ("SÍ" if config.thermal_vision else "NO"), HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color("f4d66d") if config.thermal_vision else Color("9ebfcf"))
 
 func draw_placement_preview() -> void:
 	if placement_tower < 0 or not Rect2(0, 270, 960, 540).has_point(cursor_position):

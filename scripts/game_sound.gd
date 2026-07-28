@@ -96,3 +96,53 @@ func play_effect(effect: String, volume_db := -8.0) -> void:
 	add_child(player)
 	player.finished.connect(player.queue_free)
 	player.play()
+
+func play_debug_effect(effect: String) -> void:
+	# Short synthesized cues keep debug actions recognisable without sharing a
+	# gameplay sound: pause falls, resume rises and wave-jump is a three-note cue.
+	var player := AudioStreamPlayer.new()
+	var stream := AudioStreamGenerator.new()
+	stream.mix_rate = 22050.0
+	stream.buffer_length = 0.45
+	player.stream = stream
+	player.volume_db = -4.0
+	add_child(player)
+	player.play()
+	var playback := player.get_stream_playback()
+	var duration := 0.24 if effect == "wave_jump" else 0.16
+	var frames := int(duration * stream.mix_rate)
+	for frame in range(frames):
+		var time := float(frame) / stream.mix_rate
+		var progress := time / duration
+		var frequency := 240.0
+		if effect == "pause":
+			frequency = lerpf(520.0, 240.0, progress)
+		elif effect == "resume":
+			frequency = lerpf(280.0, 680.0, progress)
+		elif effect == "wave_jump":
+			frequency = [330.0, 440.0, 660.0][mini(2, int(progress * 3.0))]
+		var envelope := sin(PI * clampf(progress, 0.0, 1.0))
+		var sample := sin(TAU * frequency * time) * envelope * 0.32
+		playback.push_frame(Vector2(sample, sample))
+	get_tree().create_timer(duration + 0.08).timeout.connect(player.queue_free)
+
+func play_money_effect() -> void:
+	# Bright double chime for a completed tower sale.
+	var player := AudioStreamPlayer.new()
+	var stream := AudioStreamGenerator.new()
+	stream.mix_rate = 22050.0
+	stream.buffer_length = 0.35
+	player.stream = stream
+	player.volume_db = -5.0
+	add_child(player)
+	player.play()
+	var playback := player.get_stream_playback()
+	var duration := 0.20
+	for frame in range(int(duration * stream.mix_rate)):
+		var time := float(frame) / stream.mix_rate
+		var note := 1046.5 if time < 0.09 else 1318.5
+		var local_time := fposmod(time, 0.10)
+		var envelope := exp(-local_time * 28.0)
+		var sample := (sin(TAU * note * time) + sin(TAU * note * 2.0 * time) * 0.22) * envelope * 0.26
+		playback.push_frame(Vector2(sample, sample))
+	get_tree().create_timer(duration + 0.08).timeout.connect(player.queue_free)
