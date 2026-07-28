@@ -1,6 +1,8 @@
 class_name GameSound
 extends Node
 
+const MENU_TRACK_NAMES := ["Brisa de Coral", "Café del Arrecife", "Atardecer Dorado", "Bahía de Neón"]
+
 const STREAMS := {
 	"click": preload("res://assets/audio/ui_click.wav"),
 	"place": preload("res://assets/audio/place_tower.wav"),
@@ -21,6 +23,7 @@ var music_playback: AudioStreamGeneratorPlayback
 var music_mode := ""
 var music_time := 0.0
 var game_track := 0
+var menu_track := 0
 
 func set_music(new_mode: String) -> void:
 	if music_mode == new_mode:
@@ -40,6 +43,11 @@ func set_music(new_mode: String) -> void:
 		music_player.play()
 		music_playback = music_player.get_stream_playback()
 
+func set_menu_track(track: int) -> void:
+	menu_track = posmod(track, MENU_TRACK_NAMES.size())
+	if music_mode == "menu":
+		music_time = 0.0
+
 func _process(delta: float) -> void:
 	if not music_playback:
 		return
@@ -51,11 +59,12 @@ func _process(delta: float) -> void:
 
 func make_music_sample(time: float) -> float:
 	var upbeat := music_mode == "game"
-	var beat: float = [0.42, 0.36, 0.48, 0.32, 0.40, 0.29][game_track] if upbeat else 0.86
+	var track: int = game_track if upbeat else menu_track
+	var beat: float = [0.42, 0.36, 0.48, 0.32, 0.40, 0.29][track] if upbeat else [0.86, 0.72, 0.94, 0.66][track]
 	var step := int(floor(time / beat))
 	var chord: float
 	var melody_note: float
-	match game_track:
+	match track:
 		1:
 			chord = [0.0, 7.0, 5.0, 3.0][int(floor(float(step) / 4.0)) % 4]
 			melody_note = [19.0, 16.0, 14.0, 21.0][step % 4]

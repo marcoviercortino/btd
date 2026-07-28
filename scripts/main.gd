@@ -62,6 +62,7 @@ var mode_selected := false
 var multiplayer_mode := false
 var online_mode := false
 var online_lobby := false
+var menu_music_select := false
 var active_player := 1
 var network_peer: ENetMultiplayerPeer
 var lobby_ip := "127.0.0.1"
@@ -894,6 +895,9 @@ func _input(event: InputEvent) -> void:
 			queue_redraw()
 			return
 	if not mode_selected:
+		if menu_music_select:
+			handle_menu_music_input(event)
+			return
 		if map_select:
 			handle_map_select_input(event)
 			return
@@ -912,6 +916,8 @@ func _input(event: InputEvent) -> void:
 				multiplayer_mode = true
 			elif Rect2(800, 330, 230, 190).has_point(menu_position):
 				online_lobby = true
+			elif Rect2(520, 650, 240, 52).has_point(menu_position):
+				menu_music_select = true
 			queue_redraw()
 		return
 	if event is InputEventKey and event.pressed and online_mode and editing_field == "debug_wave":
@@ -1641,6 +1647,11 @@ func too_close_to_path(position: Vector2) -> bool:
 
 func _draw() -> void:
 	if not mode_selected:
+		if menu_music_select:
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2(1.5, 1.5))
+			draw_menu_music_select()
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			return
 		if map_select:
 			draw_map_select()
 			return
@@ -1669,7 +1680,6 @@ func _draw() -> void:
 	for tower in towers:
 		var tower_texture = tower_texture_for(tower.type)
 		draw_texture_rect(tower_texture, Rect2(tower.position - Vector2(34, 38), Vector2(68, 68)), false)
-		draw_tower_upgrade_decorations(tower)
 	draw_spikes(spikes)
 	for balloon in balloons:
 		draw_balloon(point_on_path(balloon.distance), balloon)
@@ -1841,6 +1851,34 @@ func draw_mode_select() -> void:
 	draw_mode_card(Rect2(525, 330, 230, 190), Color("b967a0"), "CO-OP LOCAL", "Cooperativo local:\nalterna turnos", "2 jugadores")
 	draw_mode_card(Rect2(800, 330, 230, 190), Color("ef884e"), "EN LINEA 1 VS 1", "Crea una sala o\nunete a tu rival", "2 jugadores")
 	draw_centered("Haz clic en un modo para comenzar", Vector2(640, 610), 18, Color("bdd1de"))
+	draw_style_box(make_box(Color("31546c"), 10), Rect2(520, 650, 240, 52))
+	draw_centered("MÚSICA DEL MENÚ", Vector2(640, 683), 17, Color.WHITE)
+
+func draw_menu_music_select() -> void:
+	var font := ThemeDB.fallback_font
+	draw_rect(Rect2(0, 0, WIDTH, HEIGHT), Color("102536"))
+	draw_centered("MÚSICA DEL MENÚ", Vector2(640, 160), 40, Color("72d2c8"))
+	draw_centered("Elige la canción que sonará al volver al inicio", Vector2(640, 205), 18, Color("d9eef4"))
+	for index in range(GameSoundScript.MENU_TRACK_NAMES.size()):
+		var rect := Rect2(390, 270 + index * 85, 500, 66)
+		draw_style_box(make_box(Color("4b7d9e") if index == game_sound.menu_track else Color("1d4055"), 11), rect)
+		draw_string(font, rect.position + Vector2(24, 41), "%d. %s" % [index + 1, GameSoundScript.MENU_TRACK_NAMES[index]], HORIZONTAL_ALIGNMENT_LEFT, -1, 21, Color.WHITE)
+	draw_style_box(make_box(Color("294a60"), 9), Rect2(545, 670, 190, 50))
+	draw_centered("VOLVER", Vector2(640, 703), 17, Color.WHITE)
+
+func handle_menu_music_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		menu_music_select = false
+		return
+	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
+		return
+	var mouse: Vector2 = event.position / 1.5
+	for index in range(GameSoundScript.MENU_TRACK_NAMES.size()):
+		if Rect2(390, 270 + index * 85, 500, 66).has_point(mouse):
+			game_sound.set_menu_track(index)
+			return
+	if Rect2(545, 670, 190, 50).has_point(mouse):
+		menu_music_select = false
 
 func draw_mode_card(rect: Rect2, accent: Color, title: String, description: String, players: String) -> void:
 	draw_style_box(make_box(Color("1d4055"), 18), rect)
@@ -2128,7 +2166,6 @@ func draw_duel_arena(origin: Vector2, arena_towers: Array, arena_balloons: Array
 	for tower in arena_towers:
 		var tower_texture = tower_texture_for(tower.type)
 		draw_texture_rect(tower_texture, Rect2(tower.position - Vector2(34, 38), Vector2(68, 68)), false)
-		draw_tower_upgrade_decorations(tower)
 	for balloon in arena_balloons:
 		draw_balloon(point_on_path(balloon.distance), balloon)
 	for projectile in arena_projectiles:
@@ -2750,13 +2787,14 @@ func draw_inspected_tower_menu() -> void:
 		if level < mini(max_level, branches[branch].levels.size()):
 			next_cost = int(branches[branch].levels[level].get("cost", 0))
 		var maxed := level >= max_level
+		var secondary_limited := maxed and branch == secondary_branch
 		var locked := not maxed and ((level == 0 and used_branches >= 2) or (primary_branch >= 0 and branch != primary_branch and secondary_branch >= 0 and branch != secondary_branch))
-		var color := Color("d1a83b") if maxed else Color("4c515a") if locked else Color("6f353d") if next_cost > money else Color("3f986c")
+		var color := Color("50352b") if secondary_limited else Color("d1a83b") if maxed else Color("4c515a") if locked else Color("6f353d") if next_cost > money else Color("3f986c")
 		draw_style_box(make_box(color, 8), rect)
-		if maxed:
+		if maxed and not secondary_limited:
 			draw_arc(rect.get_center(), 27.0, 0.0, TAU, 20, Color("fff1a3"), 2.0)
 		draw_centered(str(branches[branch].name), rect.get_center() + Vector2(0, -8), 15, Color.WHITE)
-		draw_centered("Máximo Nivel" if maxed else "🔒 BLOQUEADA" if locked else "%s %d/%d" % [role, level, max_level], rect.get_center() + Vector2(0, 14), 12, Color("fff1a3") if maxed else Color("d9eef4"))
+		draw_centered("Límite Alcanzado" if secondary_limited else "Máximo Nivel" if maxed else "🔒 BLOQUEADA" if locked else "%s %d/%d" % [role, level, max_level], rect.get_center() + Vector2(0, 14), 12, Color("d8b49e") if secondary_limited else Color("fff1a3") if maxed else Color("d9eef4"))
 	if hover_upgrade_branch >= 0 and hover_upgrade_branch < branches.size():
 		var hover_level: int = int(levels[hover_upgrade_branch])
 		if hover_level < branches[hover_upgrade_branch].levels.size():
