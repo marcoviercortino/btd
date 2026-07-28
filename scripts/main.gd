@@ -31,6 +31,9 @@ var towers: Array[Dictionary] = []
 var projectiles: Array[Dictionary] = []
 var lightning_effects: Array[Dictionary] = []
 var bananas: Array[Dictionary] = []
+var rival_bananas: Array[Dictionary] = []
+var banana_popup_position := Vector2.ZERO
+var banana_popup_time := 0.0
 var money := 650
 var lives := 300
 var wave := 0
@@ -69,12 +72,18 @@ var loadout_select := false
 var chosen_towers: Array[int] = []
 var loadout_ready := false
 var rival_ready := false
+var random_tower := -1
+var roulette_display := -1
+var roulette_time := 0.0
+var roulette_tick := 0.0
+var roulette_rolls_left := 2
 var money_popup_amount := 0
 var money_popup_time := 0.0
 var surrender_prompt := false
 var active_duel_tab := 0
-var income := 0
-var rival_income := 0
+var beneficios := 200
+var rival_beneficios := 200
+var beneficios_timer := 0.0
 var placement_tower := -1
 var hover_tower := -1
 var cursor_position := Vector2.ZERO
@@ -99,6 +108,7 @@ func _process(delta: float) -> void:
 	if money_popup_time > 0.0:
 		money_popup_time -= delta
 	if loadout_select:
+		update_roulette(delta)
 		queue_redraw()
 		return
 	if not mode_selected:
@@ -111,6 +121,10 @@ func _process(delta: float) -> void:
 	update_online_wave_sync(delta)
 	update_balloons(delta)
 	update_banana_farms(delta)
+	beneficios_timer += delta
+	if beneficios_timer >= 5.0:
+		beneficios_timer -= 5.0
+		money += beneficios
 	if online_mode:
 		update_rival_prediction(delta)
 	update_towers(delta)
@@ -120,7 +134,7 @@ func _process(delta: float) -> void:
 		net_sync_timer -= delta
 		if net_sync_timer <= 0.0:
 			net_sync_timer = 0.10
-			rpc_update_rival.rpc(lives, money, income, wave, towers, balloons, projectiles, lightning_effects, game_over)
+			rpc_update_rival.rpc(lives, money, beneficios, wave, towers, balloons, projectiles, lightning_effects, bananas, game_over)
 	if wave_banner > 0.0:
 		wave_banner -= delta
 	queue_redraw()
@@ -134,7 +148,6 @@ func update_wave(delta: float) -> void:
 			spawn_timer = spawn_delay
 		if spawn_left == 0 and balloons.is_empty():
 			wave_active = false
-			money += 80 + wave * 12 + income
 			if online_mode:
 				report_local_wave_finished()
 			if wave >= 12 and not online_mode:
@@ -204,10 +217,10 @@ func spawn_balloon() -> void:
 		tier = 5
 	spawn_balloon_of_tier(tier)
 
-func spawn_balloon_of_tier(tier: int) -> void:
+func spawn_balloon_of_tier(tier: int, initial_distance := 0.0) -> void:
 	var hp := tier
 	var base_speed := 58.0 + wave * 4.0
-	balloons.append({"id": next_balloon_id, "distance": 0.0, "base_speed": base_speed, "speed": base_speed + tier * 7.0, "hp": hp, "max_hp": hp, "tier": tier})
+	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": base_speed, "speed": base_speed + tier * 7.0, "hp": hp, "max_hp": hp, "tier": tier})
 	next_balloon_id += 1
 
 func update_balloons(delta: float) -> void:
@@ -220,7 +233,7 @@ func update_balloons(delta: float) -> void:
 				lives = 0
 				game_over = true
 				if online_mode:
-					rpc_update_rival.rpc(lives, money, income, wave, towers, balloons, projectiles, lightning_effects, true)
+					rpc_update_rival.rpc(lives, money, beneficios, wave, towers, balloons, projectiles, lightning_effects, bananas, true)
 					rpc_report_defeat.rpc()
 
 func update_rival_prediction(delta: float) -> void:
@@ -230,9 +243,15 @@ func update_rival_prediction(delta: float) -> void:
 		if rival_balloons[i].distance >= path_total:
 			rival_balloons.remove_at(i)
 	for dart in rival_projectiles:
-		var target_position: Vector2 = dart.target_position
 		var previous_position: Vector2 = dart.position
-		dart.position = dart.position.move_toward(target_position, dart.speed * delta)
+		if dart.kind == 1 and dart.has("circle_center"):
+			var angular_step: float = dart.speed / dart.circle_radius * delta
+			dart.circle_angle += angular_step
+			dart.arc_remaining -= angular_step
+			dart.position = dart.circle_center + Vector2(cos(dart.circle_angle), sin(dart.circle_angle)) * dart.circle_radius
+		else:
+			var target_position: Vector2 = dart.target_position
+			dart.position = dart.position.move_toward(target_position, dart.speed * delta)
 		var movement: Vector2 = dart.position - previous_position
 		if movement.length_squared() > 0.01:
 			dart.direction = movement.normalized()
@@ -242,6 +261,11 @@ func update_towers(delta: float) -> void:
 		if tower.type == 5:
 			continue
 		tower.cooldown -= delta
+		if tower.type == 6:
+			if tower.cooldown <= 0.0:
+				lives = min(300, lives + 8)
+				tower.cooldown = tower.reload
+			continue
 		if tower.cooldown > 0.0:
 			continue
 		var target_index := -1
@@ -257,7 +281,15 @@ func update_towers(delta: float) -> void:
 			else:
 				var locked_target_position := point_on_path(balloons[target_index].distance)
 				var shot_direction: Vector2 = (locked_target_position - tower.position).normalized()
-				projectiles.append({"id": next_projectile_id, "position": tower.position, "target": target_index, "target_position": locked_target_position, "damage": tower.damage, "speed": tower.projectile_speed, "color": tower.color, "direction": shot_direction, "kind": tower.type, "remaining": tower.projectile_range, "hit_ids": []})
+				var projectile := {"id": next_projectile_id, "position": tower.position, "target": target_index, "target_position": locked_target_position, "damage": tower.damage, "speed": tower.projectile_speed, "color": tower.color, "direction": shot_direction, "kind": tower.type, "remaining": tower.projectile_range, "hit_ids": []}
+				if tower.type == 1:
+					var chord: Vector2 = locked_target_position - tower.position
+					var center: Vector2 = (tower.position + locked_target_position) * 0.5 + Vector2(-chord.y, chord.x) * 0.5
+					projectile.circle_center = center
+					projectile.circle_radius = tower.position.distance_to(center)
+					projectile.circle_angle = (tower.position - center).angle()
+					projectile.arc_remaining = PI * 1.45
+				projectiles.append(projectile)
 				next_projectile_id += 1
 				game_sound.play_effect("dart", -15.0)
 			tower.cooldown = tower.reload
@@ -269,9 +301,18 @@ func update_banana_farms(delta: float) -> void:
 		farm.banana_timer += delta
 		if farm.banana_timer >= 2.0:
 			farm.banana_timer = 0.0
-			bananas.append({"position": farm.position + Vector2(rng.randf_range(-34, 34), rng.randf_range(-28, 28)), "value": 35, "time": 12.0})
+			bananas.append({"position": farm.position + Vector2(rng.randf_range(-34, 34), rng.randf_range(-28, 28)), "value": 30, "time": 12.0})
+	if banana_popup_time > 0.0:
+		banana_popup_time -= delta
+	var cursor_on_map := Rect2(0, 270, 960, 540).has_point(cursor_position)
+	var cursor_map_position := (cursor_position - Vector2(0, 270)) / Vector2(0.75, 0.75)
 	for i in range(bananas.size() - 1, -1, -1):
 		bananas[i].time -= delta
+		if cursor_on_map and bananas[i].position.distance_to(cursor_map_position) < 165.0:
+			bananas[i].position = bananas[i].position.move_toward(cursor_map_position, 430.0 * delta)
+			if bananas[i].position.distance_to(cursor_map_position) < 16.0:
+				collect_banana_index(i)
+				continue
 		if bananas[i].time <= 0.0:
 			bananas.remove_at(i)
 
@@ -309,14 +350,20 @@ func update_projectiles(delta: float) -> void:
 	for i in range(projectiles.size() - 1, -1, -1):
 		var p := projectiles[i]
 		var previous_position: Vector2 = p.position
-		if p.kind == 4:
-			p.position += p.direction * p.speed * delta
-			p.remaining -= p.speed * delta
+		if p.kind == 4 or p.kind == 1:
+			if p.kind == 1:
+				var angular_step: float = p.speed / p.circle_radius * delta
+				p.circle_angle += angular_step
+				p.arc_remaining -= angular_step
+				p.position = p.circle_center + Vector2(cos(p.circle_angle), sin(p.circle_angle)) * p.circle_radius
+			else:
+				p.position += p.direction * p.speed * delta
+				p.remaining -= p.speed * delta
 			for j in range(balloons.size() - 1, -1, -1):
 				if balloons[j].id not in p.hit_ids and p.position.distance_to(point_on_path(balloons[j].distance)) < 24.0:
 					p.hit_ids.append(balloons[j].id)
 					damage_balloon(j, p.damage)
-			if p.remaining <= 0.0:
+			if (p.kind == 1 and p.arc_remaining <= 0.0) or (p.kind == 4 and p.remaining <= 0.0):
 				projectiles.remove_at(i)
 			continue
 		if p.target < 0 or p.target >= balloons.size():
@@ -332,6 +379,11 @@ func update_projectiles(delta: float) -> void:
 				for j in range(balloons.size() - 1, -1, -1):
 					if point_on_path(balloons[j].distance).distance_to(target_pos) <= 68.0:
 						damage_balloon(j, p.damage)
+			elif p.kind == 7:
+				for j in range(balloons.size() - 1, -1, -1):
+					if point_on_path(balloons[j].distance).distance_to(target_pos) <= 78.0:
+						balloons[j].distance = max(0.0, balloons[j].distance - 95.0)
+						damage_balloon(j, p.damage)
 			else:
 				damage_balloon(p.target, p.damage)
 			projectiles.remove_at(i)
@@ -339,17 +391,14 @@ func update_projectiles(delta: float) -> void:
 func damage_balloon(index: int, damage: int) -> void:
 	if index < 0 or index >= balloons.size():
 		return
-	balloons[index].hp -= damage
 	game_sound.play_effect("impact", -15.0)
-	if balloons[index].hp > 0:
-		return
-	if balloons[index].tier > 1:
-		balloons[index].tier -= 1
+	# Each health layer is one balloon tier: damage removes that many layers.
+	balloons[index].tier -= damage
+	if balloons[index].tier > 0:
 		balloons[index].max_hp = balloons[index].tier
 		balloons[index].hp = balloons[index].tier
 		balloons[index].speed = balloons[index].base_speed + balloons[index].tier * 7.0
 		return
-	money += 12
 	balloons.remove_at(index)
 	for other in projectiles:
 		if other.target > index:
@@ -366,6 +415,10 @@ func point_on_path(distance: float) -> Vector2:
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and game_sound:
 		game_sound.play_effect("click", -14.0)
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT and online_mode and placement_tower >= 0:
+		placement_tower = -1
+		queue_redraw()
+		return
 	if event is InputEventMouseMotion:
 		cursor_position = event.position
 		if online_mode:
@@ -395,6 +448,9 @@ func _input(event: InputEvent) -> void:
 			return
 		if event.keycode == KEY_1: selected_tower = 0
 		if event.keycode == KEY_2: selected_tower = 1
+		if event.keycode == KEY_3 and online_mode:
+			active_duel_tab = 1
+			queue_redraw()
 		if event.keycode == KEY_SPACE and not online_mode: start_wave()
 		if (game_over or won) and event.keycode == KEY_R: get_tree().reload_current_scene()
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
@@ -403,16 +459,18 @@ func _input(event: InputEvent) -> void:
 			get_tree().reload_current_scene()
 			return
 		if online_mode:
-			if Rect2(22, 815, 210, 28).has_point(mouse):
+			if Rect2(22, 790, 210, 52).has_point(mouse):
 				active_duel_tab = 0
+				queue_redraw()
 				return
-			if Rect2(242, 815, 210, 28).has_point(mouse):
+			if Rect2(242, 790, 210, 52).has_point(mouse):
 				active_duel_tab = 1
+				queue_redraw()
 				return
 			if active_duel_tab == 1:
-				var sent_tier := balloon_send_button_at(mouse)
-				if sent_tier > 0:
-					send_balloon_to_rival(sent_tier)
+				var send_option := balloon_send_button_at(mouse)
+				if send_option >= 0:
+					send_balloon_to_rival(send_option)
 					return
 			if surrender_prompt:
 				if Rect2(820, 575, 130, 62).has_point(mouse):
@@ -431,10 +489,16 @@ func _input(event: InputEvent) -> void:
 				return
 			if Rect2(0, 270, 960, 540).has_point(mouse):
 				var duel_position := (mouse - Vector2(0, 270)) / Vector2(0.75, 0.75)
+				if placement_tower >= 0:
+					if can_place_tower(duel_position, placement_tower):
+						place_tower(duel_position)
+					else:
+						placement_tower = -1
+					return
 				if collect_banana_at(duel_position):
 					return
-				if placement_tower >= 0 and can_place_tower(duel_position, placement_tower):
-					place_tower(duel_position)
+			if placement_tower >= 0:
+				placement_tower = -1
 			return
 		if Rect2(18, 400, 210, 72).has_point(mouse):
 			selected_tower = 0
@@ -485,17 +549,31 @@ func can_place_tower(position: Vector2, tower_kind: int) -> bool:
 func collect_banana_at(position: Vector2) -> bool:
 	for i in range(bananas.size() - 1, -1, -1):
 		if bananas[i].position.distance_to(position) <= 34.0:
-			money += bananas[i].value
-			bananas.remove_at(i)
-			game_sound.play_effect("click", -10.0)
+			collect_banana_index(i)
 			return true
 	return false
 
+func collect_banana_index(index: int) -> void:
+	if index < 0 or index >= bananas.size():
+		return
+	money += bananas[index].value
+	banana_popup_position = bananas[index].position
+	banana_popup_time = 0.85
+	bananas.remove_at(index)
+	game_sound.play_effect("click", -10.0)
+
 func tower_button_at(position: Vector2) -> int:
-	for index in range(chosen_towers.size()):
+	var available := match_towers()
+	for index in range(available.size()):
 		if tower_button_rect(index).has_point(position):
-			return chosen_towers[index]
+			return available[index]
 	return -1
+
+func match_towers() -> Array[int]:
+	var available: Array[int] = chosen_towers.duplicate()
+	if random_tower >= 0:
+		available.append(random_tower)
+	return available
 
 func tower_config(kind: int) -> Dictionary:
 	return TowerCatalogScript.config(kind)
@@ -504,39 +582,54 @@ func tower_button_rect(kind: int) -> Rect2:
 	return Rect2(22 + kind * 210, 850, 195, 150)
 
 func balloon_send_button_at(position: Vector2) -> int:
-	for tier in range(1, 4):
-		if Rect2(22 + (tier - 1) * 230, 850, 215, 150).has_point(position):
-			return tier
-	return 0
+	for option_index in range(send_options().size()):
+		if balloon_send_rect(option_index).has_point(position):
+			return option_index
+	return -1
 
-func send_balloon_to_rival(tier: int) -> void:
-	var costs := [0, 40, 90, 180]
-	var income_gain := [0, 1, 2, 4]
-	if tier < 1 or tier >= costs.size():
+func send_options() -> Array[Dictionary]:
+	return [
+		{"tier": 1, "count": 1, "cost": 40, "benefit": 1, "unlock": 0, "label": "Explorador"},
+		{"tier": 2, "count": 1, "cost": 65, "benefit": 2, "unlock": 3, "label": "Doble"},
+		{"tier": 3, "count": 1, "cost": 110, "benefit": 3, "unlock": 6, "label": "Pesado"},
+		{"tier": 3, "count": 3, "cost": 90, "benefit": 4, "unlock": 9, "label": "Trío veloz"},
+		{"tier": 5, "count": 2, "cost": 140, "benefit": 6, "unlock": 14, "label": "Dúo élite"},
+		{"tier": 4, "count": 4, "cost": 210, "benefit": 8, "unlock": 18, "label": "Escuadrón"}
+	]
+
+func balloon_send_rect(option_index: int) -> Rect2:
+	return Rect2(22 + (option_index % 3) * 230, 850 + (option_index / 3) * 108, 215, 98)
+
+func send_balloon_to_rival(option_index: int) -> void:
+	var options := send_options()
+	if option_index < 0 or option_index >= options.size():
 		return
-	if money < costs[tier]:
+	var option: Dictionary = options[option_index]
+	if wave < option.unlock or money < option.cost:
 		return
-	money -= costs[tier]
-	money_popup_amount = costs[tier]
+	money -= option.cost
+	money_popup_amount = option.cost
 	money_popup_time = 1.0
-	income += income_gain[tier]
+	beneficios += option.benefit
 	game_sound.play_effect("send")
-	rpc_receive_sent_balloon.rpc(tier)
+	rpc_receive_sent_balloon.rpc(option.tier, option.count)
 
 @rpc("any_peer", "reliable")
-func rpc_receive_sent_balloon(tier: int) -> void:
-	spawn_balloon_of_tier(clampi(tier, 1, 3))
+func rpc_receive_sent_balloon(tier: int, count: int) -> void:
+	for i in range(clampi(count, 1, 5)):
+		spawn_balloon_of_tier(clampi(tier, 1, 5), -float(i) * 70.0)
 
 @rpc("any_peer", "unreliable")
-func rpc_update_rival(remote_lives: int, remote_money: int, remote_income: int, remote_wave: int, remote_towers: Array, remote_balloons: Array, remote_projectiles_data: Array, remote_lightning: Array, remote_lost: bool) -> void:
+func rpc_update_rival(remote_lives: int, remote_money: int, remote_beneficios: int, remote_wave: int, remote_towers: Array, remote_balloons: Array, remote_projectiles_data: Array, remote_lightning: Array, remote_bananas_data: Array, remote_lost: bool) -> void:
 	rival_lives = remote_lives
 	rival_money = remote_money
-	rival_income = remote_income
+	rival_beneficios = remote_beneficios
 	rival_wave = remote_wave
 	rival_towers = remote_towers
 	rival_balloons = remote_balloons
 	rival_projectiles = RemotePredictionScript.merge_projectiles(rival_projectiles, remote_projectiles_data)
 	rival_lightning_effects = remote_lightning
+	rival_bananas = remote_bananas_data
 	rival_defeated = remote_lost
 	if remote_lost and not game_over:
 		won = true
@@ -801,6 +894,7 @@ func draw_online_duel() -> void:
 	draw_duel_arena(Vector2(960, 270), rival_towers, rival_balloons, rival_projectiles)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	draw_bananas()
+	draw_rival_bananas()
 	draw_local_lightning()
 	draw_remote_lightning()
 	draw_placement_preview()
@@ -810,22 +904,23 @@ func draw_online_duel() -> void:
 	var font := ThemeDB.fallback_font
 	draw_string(font, Vector2(60, 82), "TU FRENTE", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color("8ce1f1"))
 	draw_string(font, Vector2(60, 126), "VIDAS %d  ·  $ %d  ·  OLEADA %d" % [lives, money, wave], HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
-	draw_rect(Rect2(60, 150, 610, 18), Color("263544"))
-	draw_rect(Rect2(60, 150, 610.0 * lives / 300.0, 18), Color("65d98a"))
-	draw_string(font, Vector2(60, 205), "INCOME +$%d" % income, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("8ce1f1"))
+	draw_rect(Rect2(60, 178, 610, 18), Color("263544"))
+	draw_rect(Rect2(60, 178, 610.0 * lives / 300.0, 18), Color("65d98a"))
+	draw_string(font, Vector2(60, 233), "BENEFICIOS +$%d / 5 s" % beneficios, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("8ce1f1"))
 	if money_popup_time > 0.0:
 		var popup_alpha: float = clampf(money_popup_time / 0.75, 0.0, 1.0)
-		var popup_y: float = 178.0 - (1.0 - popup_alpha) * 45.0
-		draw_string(font, Vector2(60, popup_y), "- $ %d" % money_popup_amount, HORIZONTAL_ALIGNMENT_LEFT, -1, 23, Color(1.0, 0.32, 0.32, popup_alpha))
+		var popup_y: float = 160.0 - (1.0 - popup_alpha) * 35.0
+		draw_string(font, Vector2(285, popup_y), "- $ %d" % money_popup_amount, HORIZONTAL_ALIGNMENT_LEFT, -1, 23, Color(1.0, 0.32, 0.32, popup_alpha))
 	draw_string(font, Vector2(1230, 82), "FRENTE RIVAL", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color("ffb0a8"))
 	draw_string(font, Vector2(1230, 126), "VIDAS %d  ·  $ %d  ·  OLEADA %d" % [rival_lives, rival_money, rival_wave], HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
-	draw_rect(Rect2(1230, 150, 610, 18), Color("263544"))
-	draw_rect(Rect2(1230, 150, 610.0 * rival_lives / 300.0, 18), Color("ef7676"))
-	draw_string(font, Vector2(1230, 205), "INCOME +$%d" % rival_income, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("ffb0a8"))
+	draw_rect(Rect2(1230, 178, 610, 18), Color("263544"))
+	draw_rect(Rect2(1230, 178, 610.0 * rival_lives / 300.0, 18), Color("ef7676"))
+	draw_string(font, Vector2(1230, 233), "BENEFICIOS +$%d / 5 s" % rival_beneficios, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("ffb0a8"))
 	draw_duel_tabs(font)
 	if active_duel_tab == 0:
-		for slot in range(chosen_towers.size()):
-			draw_tower_button(tower_button_rect(slot), chosen_towers[slot])
+		var available := match_towers()
+		for slot in range(available.size()):
+			draw_tower_button(tower_button_rect(slot), available[slot])
 		draw_tower_tooltip()
 	else:
 		draw_balloon_send_buttons(font)
@@ -863,8 +958,22 @@ func draw_dart(position: Vector2, color: Color, direction: Vector2) -> void:
 	draw_circle(tip, 3.5, Color.WHITE)
 
 func draw_bananas() -> void:
+	draw_banana_group(Vector2(0, 270), bananas)
+	# Local pickup text is only drawn on our own arena.
 	draw_set_transform(Vector2(0, 270), 0.0, Vector2(0.75, 0.75))
-	for banana in bananas:
+	if banana_popup_time > 0.0:
+		var font := ThemeDB.fallback_font
+		var popup_alpha: float = clampf(banana_popup_time / 0.65, 0.0, 1.0)
+		var popup_position := banana_popup_position + Vector2(0, -42.0 * (1.0 - popup_alpha))
+		draw_string(font, popup_position, "+$30", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.88, 0.25, popup_alpha))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+func draw_rival_bananas() -> void:
+	draw_banana_group(Vector2(960, 270), rival_bananas)
+
+func draw_banana_group(origin: Vector2, banana_list: Array) -> void:
+	draw_set_transform(origin, 0.0, Vector2(0.75, 0.75))
+	for banana in banana_list:
 		draw_circle(banana.position, 14, Color("8d7130"))
 		draw_circle(banana.position + Vector2(0, -2), 12, Color("ffe164"))
 		draw_arc(banana.position, 9, 0.25, 2.75, 12, Color("fff3a0"), 3.0)
@@ -875,6 +984,10 @@ func open_loadout_select(is_online: bool) -> void:
 	loadout_select = true
 	online_mode = is_online
 	chosen_towers.clear()
+	random_tower = -1
+	roulette_display = -1
+	roulette_time = 0.0
+	roulette_rolls_left = 2
 	loadout_ready = false
 	rival_ready = false
 
@@ -891,13 +1004,19 @@ func handle_loadout_input(event: InputEvent) -> void:
 		return
 	for kind in range(TOWER_NAMES.size()):
 		if loadout_card_rect(kind).has_point(event.position):
+			if random_tower >= 0 or roulette_time > 0.0:
+				return
 			if kind in chosen_towers:
 				chosen_towers.erase(kind)
-			elif chosen_towers.size() < 4 and not loadout_ready:
+			elif chosen_towers.size() < 3 and not loadout_ready:
 				chosen_towers.append(kind)
 			queue_redraw()
 			return
-	if Rect2(760, 865, 400, 76).has_point(event.position) and chosen_towers.size() == 4:
+	if Rect2(1480, 690, 300, 70).has_point(event.position) and roulette_rolls_left > 0 and roulette_time <= 0.0:
+		start_roulette()
+		queue_redraw()
+		return
+	if Rect2(760, 865, 400, 76).has_point(event.position) and chosen_towers.size() == 3 and random_tower >= 0:
 		loadout_ready = true
 		if online_mode:
 			if multiplayer.is_server():
@@ -908,6 +1027,30 @@ func handle_loadout_input(event: InputEvent) -> void:
 		else:
 			start_match_after_loadout()
 		queue_redraw()
+
+func start_roulette() -> void:
+	if chosen_towers.size() < 3:
+		return
+	roulette_rolls_left -= 1
+	roulette_time = 1.25
+	roulette_tick = 0.0
+	random_tower = -1
+
+func update_roulette(delta: float) -> void:
+	if roulette_time <= 0.0:
+		return
+	roulette_time -= delta
+	roulette_tick -= delta
+	if roulette_tick <= 0.0:
+		roulette_tick = 0.09 + max(0.0, 1.15 - roulette_time) * 0.09
+		var options: Array[int] = []
+		for kind in range(TOWER_NAMES.size()):
+			if kind not in chosen_towers:
+				options.append(kind)
+		if not options.is_empty():
+			roulette_display = options[rng.randi_range(0, options.size() - 1)]
+	if roulette_time <= 0.0:
+		random_tower = roulette_display
 
 @rpc("any_peer", "reliable")
 func rpc_loadout_ready() -> void:
@@ -938,8 +1081,8 @@ func start_match_after_loadout() -> void:
 
 func draw_loadout_select() -> void:
 	draw_rect(Rect2(0, 0, WIDTH, HEIGHT), Color("102536"))
-	draw_centered("ELIGE 4 TORRES", Vector2(960, 170), 46, Color("72d2c8"))
-	draw_centered("%d / 4 seleccionadas" % chosen_towers.size(), Vector2(960, 225), 24, Color("d9eef4"))
+	draw_centered("ELIGE 3 TORRES + 1 ALEATORIA", Vector2(960, 170), 42, Color("72d2c8"))
+	draw_centered("%d / 3 seleccionadas · Ruleta: %d tiradas" % [chosen_towers.size(), roulette_rolls_left], Vector2(960, 225), 24, Color("d9eef4"))
 	var font := ThemeDB.fallback_font
 	for kind in range(TOWER_NAMES.size()):
 		var rect := loadout_card_rect(kind)
@@ -950,7 +1093,8 @@ func draw_loadout_select() -> void:
 		draw_string(font, rect.position + Vector2(160, 112), "$ %d" % TOWER_COSTS[kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("ffd76a"))
 		draw_string(font, rect.position + Vector2(24, 190), "Daño %d · Recarga %.2f s" % [tower_config(kind).damage, tower_config(kind).reload], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("d9eef4"))
 		draw_string(font, rect.position + Vector2(24, 220), "Alcance %d" % tower_config(kind).range, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("bdd1de"))
-	var ready_color := Color("4bba83") if chosen_towers.size() == 4 else Color("355b70")
+	draw_random_slot(font)
+	var ready_color := Color("4bba83") if chosen_towers.size() == 3 and random_tower >= 0 else Color("355b70")
 	draw_style_box(make_box(ready_color, 12), Rect2(760, 865, 400, 76))
 	draw_centered("PREPARADO" if not loadout_ready else "ESPERANDO RIVAL", Vector2(960, 913), 25, Color.WHITE)
 	if online_mode:
@@ -960,9 +1104,23 @@ func draw_loadout_select() -> void:
 	draw_centered("Esc: volver", Vector2(960, 1030), 17, Color("bdd1de"))
 
 func loadout_card_rect(kind: int) -> Rect2:
-	var column: int = kind % 3
-	var row: int = kind / 3
-	return Rect2(300 + column * 450, 285 + row * 275, 390, 240)
+	var column: int = kind % 4
+	var row: int = kind / 4
+	return Rect2(45 + column * 345, 285 + row * 275, 310, 240)
+
+func draw_random_slot(font: Font) -> void:
+	var rect := Rect2(1430, 350, 390, 290)
+	draw_style_box(make_box(Color("3a3152"), 16), rect)
+	draw_string(font, rect.position + Vector2(25, 45), "4ª TORRE ALEATORIA", HORIZONTAL_ALIGNMENT_LEFT, -1, 23, Color("f4d66d"))
+	if roulette_display >= 0:
+		draw_texture_rect(tower_texture_for(roulette_display), Rect2(rect.position + Vector2(30, 72), Vector2(115, 115)), false)
+		draw_string(font, rect.position + Vector2(165, 120), TOWER_NAMES[roulette_display], HORIZONTAL_ALIGNMENT_LEFT, 190, 21, Color.WHITE)
+		draw_string(font, rect.position + Vector2(165, 156), "$ %d" % TOWER_COSTS[roulette_display], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("ffd76a"))
+	else:
+		draw_centered("?", rect.get_center() + Vector2(0, 12), 86, Color("9a7ee8"))
+	var button_color := Color("8a5db6") if roulette_rolls_left > 0 and roulette_time <= 0.0 else Color("4c4160")
+	draw_style_box(make_box(button_color, 10), Rect2(1480, 690, 300, 70))
+	draw_centered("ROLL (%d)" % roulette_rolls_left, Vector2(1630, 734), 24, Color.WHITE)
 
 func draw_local_lightning() -> void:
 	draw_lightning_effects(Vector2(0, 270), lightning_effects)
@@ -982,34 +1140,43 @@ func draw_lightning_effects(origin: Vector2, effects: Array) -> void:
 func draw_tower_button(rect: Rect2, kind: int) -> void:
 	var active := placement_tower == kind
 	var hovered := hover_tower == kind
-	var fill := Color("31546c") if active else Color("294a60") if hovered else Color("1d4055")
+	var fill := Color("6f353d") if money < TOWER_COSTS[kind] else Color("31546c") if active else Color("294a60") if hovered else Color("1d4055")
 	draw_style_box(make_box(fill, 12), rect)
 	var tower_texture = tower_texture_for(kind)
-	draw_texture_rect(tower_texture, Rect2(rect.position + Vector2(10, 16), Vector2(100, 100)), false)
+	draw_texture_rect(tower_texture, Rect2(rect.position + Vector2((rect.size.x - 92) / 2.0, 10), Vector2(92, 92)), false)
 	var font := ThemeDB.fallback_font
-	draw_string(font, rect.position + Vector2(120, 50), TOWER_NAMES[kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 25, Color.WHITE)
-	draw_string(font, rect.position + Vector2(120, 88), "$ %d" % TOWER_COSTS[kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color("ffd76a"))
-	draw_string(font, rect.position + Vector2(120, 119), "Clic para colocar", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("bdd1de"))
+	var price_text := "$ %d" % TOWER_COSTS[kind]
+	var price_width := font.get_string_size(price_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x
+	draw_string(font, rect.position + Vector2((rect.size.x - price_width) / 2.0, 125), price_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color("ffd76a"))
+	draw_string(font, rect.position + Vector2(32, 145), "Clic para colocar", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("bdd1de"))
 
 func draw_duel_tabs(font: Font) -> void:
 	var char_color := Color("31546c") if active_duel_tab == 0 else Color("1d4055")
 	var balloon_color := Color("31546c") if active_duel_tab == 1 else Color("1d4055")
-	draw_style_box(make_box(char_color, 7), Rect2(22, 815, 210, 28))
-	draw_style_box(make_box(balloon_color, 7), Rect2(242, 815, 210, 28))
-	draw_string(font, Vector2(55, 837), "PERSONAJES", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)
-	draw_string(font, Vector2(278, 837), "ENVIAR GLOBOS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)
+	draw_style_box(make_box(char_color, 9), Rect2(22, 790, 210, 52))
+	draw_style_box(make_box(balloon_color, 9), Rect2(242, 790, 210, 52))
+	draw_string(font, Vector2(52, 823), "PERSONAJES", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
+	draw_string(font, Vector2(264, 823), "ENVIAR GLOBOS", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
 
 func draw_balloon_send_buttons(font: Font) -> void:
-	var costs := [0, 40, 90, 180]
-	var incomes := [0, 1, 2, 4]
-	var colors := [Color.WHITE, Color("478fe4"), Color("f5d35d"), Color("a97cdd")]
-	for tier in range(1, 4):
-		var rect := Rect2(22 + (tier - 1) * 230, 850, 215, 150)
-		draw_style_box(make_box(Color("1d4055"), 12), rect)
-		draw_circle(rect.position + Vector2(55, 69), 32, colors[tier])
-		draw_string(font, rect.position + Vector2(105, 48), "Globo nivel %d" % tier, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
-		draw_string(font, rect.position + Vector2(105, 79), "$ %d" % costs[tier], HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color("ffd76a"))
-		draw_string(font, rect.position + Vector2(105, 111), "+%d income" % incomes[tier], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("8ce1f1"))
+	var options := send_options()
+	var colors := [Color.WHITE, Color("478fe4"), Color("f5d35d"), Color("a97cdd"), Color("7bd4bf"), Color("ee8f54")]
+	for index in range(options.size()):
+		var option: Dictionary = options[index]
+		var rect := balloon_send_rect(index)
+		var unlocked: bool = wave >= option.unlock
+		var fill := Color("6f353d") if unlocked and money < option.cost else Color("1d4055") if unlocked else Color("4c515a")
+		draw_style_box(make_box(fill, 10), rect)
+		var icon_color: Color = colors[clampi(option.tier, 1, colors.size() - 1)]
+		if not unlocked: icon_color = icon_color.darkened(0.65)
+		draw_circle(rect.position + Vector2(38, 45), 24, icon_color)
+		draw_string(font, rect.position + Vector2(72, 31), option.label, HORIZONTAL_ALIGNMENT_LEFT, 130, 15, Color.WHITE if unlocked else Color("b2b6bb"))
+		draw_string(font, rect.position + Vector2(72, 57), "%d × nivel %d · $%d" % [option.count, option.tier, option.cost], HORIZONTAL_ALIGNMENT_LEFT, 135, 14, Color("ffd76a") if unlocked else Color("a4a4a4"))
+		draw_string(font, rect.position + Vector2(72, 82), "+%d beneficios" % option.benefit, HORIZONTAL_ALIGNMENT_LEFT, 135, 13, Color("8ce1f1") if unlocked else Color("9ca0a4"))
+		if not unlocked:
+			draw_circle(rect.position + Vector2(38, 45), 14, Color("30343a"))
+			draw_string(font, rect.position + Vector2(31, 52), "🔒", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
+			draw_string(font, rect.position + Vector2(12, 94), "Oleada %d" % option.unlock, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("d4d4d4"))
 
 func draw_tower_tooltip() -> void:
 	if hover_tower < 0:
@@ -1035,9 +1202,9 @@ func draw_placement_preview() -> void:
 	var texture = tower_texture_for(placement_tower)
 	draw_set_transform(Vector2(0, 270), 0.0, Vector2(0.75, 0.75))
 	draw_circle(preview_position, tower_config(placement_tower).range, Color(0.35, 0.75, 1.0, 0.13) if is_valid else Color(1.0, 0.25, 0.25, 0.15))
-	draw_texture_rect(texture, Rect2(preview_position - Vector2(34, 38), Vector2(68, 68)), false, tint)
+	draw_texture_rect(texture, Rect2(preview_position - Vector2(34, 34), Vector2(68, 68)), false, tint)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 func tower_texture_for(kind: int):
-	var textures := [DART_RANGER_TEXTURE, BOOMERANG_SCOUT_TEXTURE, BOMBARDIER_TEXTURE, LIGHTNING_MAGE_TEXTURE, MYSTIC_ARCHER_TEXTURE, BANANA_FARMER_TEXTURE]
+	var textures := [DART_RANGER_TEXTURE, BOOMERANG_SCOUT_TEXTURE, BOMBARDIER_TEXTURE, LIGHTNING_MAGE_TEXTURE, MYSTIC_ARCHER_TEXTURE, BANANA_FARMER_TEXTURE, REEF_MEDIC_TEXTURE, TIDE_CAPTAIN_TEXTURE]
 	return textures[kind]
