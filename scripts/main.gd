@@ -111,6 +111,7 @@ var gameplay_speed := 1.0
 var local_speed_vote := 0
 var rival_speed_vote := 0
 var debug_mode := false
+var debug_panel_open := true
 var local_debug_vote := 0
 var rival_debug_vote := 0
 var debug_paused := false
@@ -939,7 +940,7 @@ func _input(event: InputEvent) -> void:
 			if Rect2(1600, 215, 120, 38).has_point(mouse):
 				set_requested_debug_mode()
 				return
-			if debug_mode:
+			if debug_mode and debug_panel_open:
 				if Rect2(1440, 305, 180, 35).has_point(mouse):
 					debug_tab = 0
 					debug_spawn_kind = -1
@@ -1328,10 +1329,13 @@ func rpc_set_game_speed(new_speed: float) -> void:
 	rival_speed_vote = 0
 
 func set_requested_debug_mode() -> void:
+	if debug_mode:
+		debug_panel_open = not debug_panel_open
+		return
 	if multiplayer.is_server():
-		rpc_set_debug_mode.rpc(not debug_mode)
+		rpc_set_debug_mode.rpc(true)
 	else:
-		rpc_request_debug_toggle.rpc_id(1, not debug_mode)
+		rpc_request_debug_toggle.rpc_id(1, true)
 
 @rpc("any_peer", "reliable")
 func rpc_request_debug_toggle(enabled: bool) -> void:
@@ -1355,6 +1359,7 @@ func try_apply_debug_vote() -> void:
 @rpc("any_peer", "call_local", "reliable")
 func rpc_set_debug_mode(enabled: bool) -> void:
 	debug_mode = enabled
+	debug_panel_open = enabled
 	debug_paused = false
 	if not enabled:
 		debug_invulnerable = false
@@ -1740,15 +1745,38 @@ func draw_camouflage_pattern(position: Vector2, balloon: Dictionary, radius: flo
 func draw_regenerative_heart(position: Vector2, balloon: Dictionary, radius: float) -> void:
 	if not balloon.get("regenerative", false):
 		return
-	var heart_color := Color("ff5f83")
-	var outline := Color("7c2542")
+	var tier_colors := [Color("ef5e62"), Color("478fe4"), Color("f5d35d"), Color("a97cdd"), Color("7bd4bf"), Color("ee8f54"), Color("773b68"), Color("f5f7ff"), Color("33435f"), Color("f09fdb")]
+	var tier: int = clampi(int(balloon.get("tier", 1)), 1, tier_colors.size() - 1)
+	var heart_color: Color = tier_colors[tier]
+	if balloon.get("armored", false):
+		heart_color = Color("778b98")
+	elif balloon.get("magic_shield", false):
+		heart_color = Color("744cb4")
+	elif balloon.get("ceramic_shell", false):
+		heart_color = Color("d6b89a")
+	elif balloon.get("moab", false):
+		heart_color = Color("3f83ba")
+	var outline := heart_color.darkened(0.58)
 	draw_circle(position + Vector2(-radius * 0.28, -radius * 0.18), radius * 0.34, outline)
 	draw_circle(position + Vector2(radius * 0.28, -radius * 0.18), radius * 0.34, outline)
 	draw_colored_polygon(PackedVector2Array([position + Vector2(-radius * 0.60, -radius * 0.10), position + Vector2(radius * 0.60, -radius * 0.10), position + Vector2(0, radius * 0.72)]), outline)
 	draw_circle(position + Vector2(-radius * 0.28, -radius * 0.18), radius * 0.27, heart_color)
 	draw_circle(position + Vector2(radius * 0.28, -radius * 0.18), radius * 0.27, heart_color)
 	draw_colored_polygon(PackedVector2Array([position + Vector2(-radius * 0.48, -radius * 0.10), position + Vector2(radius * 0.48, -radius * 0.10), position + Vector2(0, radius * 0.57)]), heart_color)
-	draw_circle(position + Vector2(-radius * 0.18, -radius * 0.30), radius * 0.07, Color.WHITE)
+	if balloon.get("armored", false):
+		draw_line(position + Vector2(-radius * 0.43, -radius * 0.25), position + Vector2(radius * 0.35, radius * 0.37), Color("d4e2e8"), 3.0)
+		draw_line(position + Vector2(-radius * 0.36, radius * 0.34), position + Vector2(radius * 0.40, -radius * 0.28), Color("d4e2e8"), 3.0)
+	elif balloon.get("magic_shield", false):
+		draw_arc(position, radius * 0.54, 0.0, TAU, 18, Color("c9baff"), 2.5)
+	elif balloon.get("ceramic_shell", false):
+		draw_line(position + Vector2(-radius * 0.42, -radius * 0.28), position + Vector2(radius * 0.05, radius * 0.42), Color("755648"), 2.5)
+		draw_line(position + Vector2(radius * 0.35, -radius * 0.20), position + Vector2(-radius * 0.12, radius * 0.45), Color("755648"), 2.5)
+	elif balloon.get("moab", false) or tier == 9:
+		draw_circle(position + Vector2(-radius * 0.19, -radius * 0.22), radius * 0.08, outline)
+		draw_circle(position + Vector2(radius * 0.19, -radius * 0.22), radius * 0.08, outline)
+		draw_arc(position + Vector2(0, radius * 0.06), radius * 0.25, 0.15, PI - 0.15, 10, outline, 2.0)
+	else:
+		draw_circle(position + Vector2(-radius * 0.18, -radius * 0.30), radius * 0.07, Color.WHITE)
 
 func draw_centered(text_value: String, center: Vector2, size: int, color: Color) -> void:
 	var font := ThemeDB.fallback_font
@@ -1949,7 +1977,7 @@ func draw_online_duel() -> void:
 	elif local_debug_vote > 0:
 		draw_style_box(make_box(Color("31546c"), 9), Rect2(1360, 258, 500, 34))
 		draw_centered("ESPERANDO AL RIVAL PARA %s DEBUG" % ("ACTIVAR" if local_debug_vote == 1 else "DESACTIVAR"), Vector2(1610, 281), 15, Color.WHITE)
-	if debug_mode:
+	if debug_mode and debug_panel_open:
 		draw_debug_controls(font)
 	if debug_paused:
 		draw_style_box(make_box(Color(0.20, 0.09, 0.32, 0.92), 12), Rect2(690, 450, 540, 100))
