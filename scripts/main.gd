@@ -19,6 +19,7 @@ const MYSTIC_ARCHER_TEXTURE = preload("res://assets/characters/mystic_archer.svg
 const REEF_MEDIC_TEXTURE = preload("res://assets/characters/reef_medic.svg")
 const BANANA_FARMER_TEXTURE = preload("res://assets/characters/banana_farmer.svg")
 const PIRATE_TEXTURE = preload("res://assets/characters/pirate.svg")
+const PATHCUTTER_TEXTURE = preload("res://assets/characters/pathcutter.svg")
 const BOOMERANG_PROJECTILE_TEXTURE = preload("res://assets/projectiles/boomerang.svg")
 
 var path := PackedVector2Array([
@@ -32,6 +33,7 @@ var towers: Array[Dictionary] = []
 var projectiles: Array[Dictionary] = []
 var lightning_effects: Array[Dictionary] = []
 var sword_swipes: Array[Dictionary] = []
+var spikes: Array[Dictionary] = []
 var bananas: Array[Dictionary] = []
 var rival_bananas: Array[Dictionary] = []
 var banana_popup_position := Vector2.ZERO
@@ -97,6 +99,7 @@ var local_wave_finished := false
 var rival_wave_finished := false
 var online_wave_start_timer := -1.0
 var game_sound: GameSound
+var result_sound_played := false
 var gameplay_speed := 1.0
 var local_speed_vote := 0
 var rival_speed_vote := 0
@@ -121,6 +124,7 @@ var map_roulette_result := 0
 func _ready() -> void:
 	game_sound = GameSoundScript.new()
 	add_child(game_sound)
+	game_sound.set_music("menu")
 	var settings := ConfigFile.new()
 	if settings.load("user://balloon_frontier.cfg") == OK:
 		lobby_ip = settings.get_value("online", "last_ip", lobby_ip)
@@ -134,19 +138,26 @@ func _process(delta: float) -> void:
 	if money_popup_time > 0.0:
 		money_popup_time -= delta
 	if map_select:
+		game_sound.set_music("menu")
 		update_map_selection(delta)
 		queue_redraw()
 		return
 	if loadout_select:
+		game_sound.set_music("menu")
 		update_roulette(delta)
 		queue_redraw()
 		return
 	if not mode_selected:
+		game_sound.set_music("menu")
 		queue_redraw()
 		return
 	if game_over or won:
+		if not result_sound_played:
+			game_sound.play_effect("win" if won else "lose", -8.0)
+			result_sound_played = true
 		queue_redraw()
 		return
+	game_sound.set_music("game")
 	var gameplay_delta := delta * gameplay_speed
 	update_wave(gameplay_delta)
 	update_online_wave_sync(gameplay_delta)
@@ -238,6 +249,12 @@ func rpc_begin_online_wave(next_wave: int) -> void:
 	start_wave_local()
 
 func spawn_balloon() -> void:
+	if wave >= 25 and rng.randf() < minf(0.022 + (wave - 25) * 0.009, 0.10):
+		spawn_magic_shield_balloon()
+		return
+	if wave >= 23 and rng.randf() < minf(0.025 + (wave - 23) * 0.01, 0.12):
+		spawn_armored_balloon()
+		return
 	if wave >= 16 and rng.randf() < minf(0.06 + (wave - 16) * 0.014, 0.24):
 		spawn_moab()
 		return
@@ -250,12 +267,19 @@ func spawn_balloon() -> void:
 		tier = 4
 	if wave >= 10 and rng.randf() < minf(0.04 + (wave - 10) * 0.014, 0.24):
 		tier = 5
+	if wave >= 15 and rng.randf() < minf(0.035 + (wave - 15) * 0.012, 0.16):
+		tier = 6
+	if wave >= 18 and rng.randf() < minf(0.025 + (wave - 18) * 0.011, 0.13):
+		tier = 7
 	spawn_balloon_of_tier(tier)
 
 func spawn_balloon_of_tier(tier: int, initial_distance := 0.0) -> void:
 	var hp := tier
 	var base_speed := 58.0 + wave * 4.0
-	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": base_speed, "speed": base_speed + tier * 7.0, "hp": hp, "max_hp": hp, "tier": tier, "moab": false, "leak_damage": tier, "radius": 24.0})
+	var balloon_speed: float = base_speed + tier * 7.0
+	if tier == 7:
+		balloon_speed *= 1.65
+	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": base_speed, "speed": balloon_speed, "hp": hp, "max_hp": hp, "tier": tier, "moab": false, "split_on_destroy": tier == 6, "leak_damage": tier, "radius": 24.0})
 	next_balloon_id += 1
 
 func spawn_moab(initial_distance := 0.0) -> void:
@@ -264,9 +288,28 @@ func spawn_moab(initial_distance := 0.0) -> void:
 	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": speed, "speed": speed, "hp": layers, "max_hp": layers, "tier": layers, "moab": true, "leak_damage": 25 + max(0, wave - 20) * 2, "radius": 43.0})
 	next_balloon_id += 1
 
+func spawn_armored_balloon(initial_distance := 0.0) -> void:
+	var base_speed: float = 58.0 + wave * 4.0
+	var tier_two_speed: float = base_speed + 14.0
+	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": base_speed, "speed": tier_two_speed, "hp": 32, "max_hp": 32, "tier": 8, "moab": false, "armored": true, "armor_hp": 32, "leak_damage": 18, "radius": 35.0})
+	next_balloon_id += 1
+
+func spawn_magic_shield_balloon(initial_distance := 0.0) -> void:
+	var base_speed: float = 58.0 + wave * 4.0
+	var tier_two_speed: float = base_speed + 14.0
+	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": base_speed, "speed": tier_two_speed, "hp": 32, "max_hp": 32, "tier": 8, "moab": false, "magic_shield": true, "shield_hp": 32, "leak_damage": 18, "radius": 35.0})
+	next_balloon_id += 1
+
 func update_balloons(delta: float) -> void:
 	for i in range(balloons.size() - 1, -1, -1):
 		balloons[i].distance += balloons[i].speed * delta
+		for spike_index in range(spikes.size() - 1, -1, -1):
+			if point_on_path(balloons[i].distance).distance_to(spikes[spike_index].position) <= 18.0:
+				spikes.remove_at(spike_index)
+				damage_balloon(i, 1, "physical")
+				break
+		if i >= balloons.size():
+			continue
 		if balloons[i].distance >= path_total:
 			lives -= int(balloons[i].get("leak_damage", balloons[i].tier))
 			balloons.remove_at(i)
@@ -316,20 +359,14 @@ func update_towers(delta: float) -> void:
 				lives = min(300, lives + 8)
 				tower.cooldown = tower.reload
 			continue
+		if tower.type == 8:
+			if tower.cooldown <= 0.0:
+				drop_path_spikes(tower.position, tower.range)
+				tower.cooldown = tower.reload
+			continue
 		if tower.cooldown > 0.0:
 			continue
-		var target_index := -1
-		var best_distance := -1.0
-		for i in balloons.size():
-			var balloon_position := point_on_path(balloons[i].distance)
-			var target_distance: float = tower.position.distance_to(balloon_position)
-			# A boomerang can only lock a balloon that can lie on its fixed circular route.
-			var can_mark: bool = target_distance <= float(tower.range)
-			if tower.type == 1:
-				can_mark = target_distance <= minf(tower.range, 160.0)
-			if can_mark and balloons[i].distance > best_distance:
-				target_index = i
-				best_distance = balloons[i].distance
+		var target_index := choose_tower_target(tower)
 		if target_index >= 0:
 			if tower.type == 3:
 				cast_chain_lightning(tower.position, target_index)
@@ -338,7 +375,7 @@ func update_towers(delta: float) -> void:
 			else:
 				var locked_target_position := point_on_path(balloons[target_index].distance)
 				var shot_direction: Vector2 = (locked_target_position - tower.position).normalized()
-				var projectile := {"id": next_projectile_id, "position": tower.position, "target": target_index, "target_position": locked_target_position, "damage": tower.damage, "speed": tower.projectile_speed, "color": tower.color, "direction": shot_direction, "kind": tower.type, "remaining": tower.projectile_range, "hit_ids": []}
+				var projectile := {"id": next_projectile_id, "position": tower.position, "target": target_index, "target_position": locked_target_position, "damage": tower.damage, "damage_type": tower.damage_type, "speed": tower.projectile_speed, "color": tower.color, "direction": shot_direction, "kind": tower.type, "remaining": tower.projectile_range, "hit_ids": []}
 				if tower.type == 1:
 					var chord: Vector2 = locked_target_position - tower.position
 					var fixed_radius: float = 80.0
@@ -358,6 +395,32 @@ func update_towers(delta: float) -> void:
 				next_projectile_id += 1
 				game_sound.play_effect("dart", -15.0)
 			tower.cooldown = tower.reload
+
+func choose_tower_target(tower: Dictionary) -> int:
+	var mode: int = int(tower.get("target_mode", 0))
+	var chosen_index := -1
+	for index in range(balloons.size()):
+		var balloon_position := point_on_path(balloons[index].distance)
+		var target_distance: float = tower.position.distance_to(balloon_position)
+		var can_mark: bool = target_distance <= float(tower.range)
+		if tower.type == 1:
+			can_mark = target_distance <= minf(float(tower.range), 160.0)
+		if not can_mark:
+			continue
+		if chosen_index < 0:
+			chosen_index = index
+			continue
+		var current: Dictionary = balloons[chosen_index]
+		var candidate: Dictionary = balloons[index]
+		if mode == 0 and candidate.distance > current.distance:
+			chosen_index = index
+		elif mode == 1 and candidate.distance < current.distance:
+			chosen_index = index
+		elif mode == 2 and (candidate.tier > current.tier or (candidate.tier == current.tier and candidate.distance > current.distance)):
+			chosen_index = index
+		elif mode == 3 and (candidate.tier < current.tier or (candidate.tier == current.tier and candidate.distance > current.distance)):
+			chosen_index = index
+	return chosen_index
 
 func update_banana_farms(delta: float) -> void:
 	for farm in towers:
@@ -397,7 +460,7 @@ func cast_chain_lightning(origin: Vector2, first_target: int) -> void:
 			break
 		chain_points.append(point_on_path(balloons[current_index].distance))
 		used.append(current_index)
-		damage_balloon(current_index, 1)
+		damage_balloon(current_index, 1, "magic")
 		var next_index := -1
 		var best_distance := INF
 		var origin_point := chain_points[chain_points.size() - 1]
@@ -423,8 +486,24 @@ func cast_pirate_sweep(origin: Vector2, target_position: Vector2) -> void:
 	for index in range(balloons.size() - 1, -1, -1):
 		var offset: Vector2 = point_on_path(balloons[index].distance) - origin
 		if offset.length() <= 90.0 and facing.dot(offset.normalized()) >= 0.0:
-			damage_balloon(index, 2)
+			damage_balloon(index, 2, "physical")
 	sword_swipes.append({"position": origin, "angle": facing.angle(), "time": 0.32})
+
+func drop_path_spikes(origin: Vector2, tower_range: float) -> void:
+	for _attempt in range(24):
+		var drop_position := point_on_path(rng.randf_range(0.0, path_total))
+		if origin.distance_to(drop_position) > tower_range or spike_density(drop_position) >= 50:
+			continue
+		for _spike in range(4):
+			spikes.append({"position": drop_position + Vector2(rng.randf_range(-8, 8), rng.randf_range(-8, 8))})
+		return
+
+func spike_density(position: Vector2) -> int:
+	var count := 0
+	for spike in spikes:
+		if absf(spike.position.x - position.x) <= 25.0 and absf(spike.position.y - position.y) <= 25.0:
+			count += 1
+	return count
 
 func update_sword_swipes(delta: float) -> void:
 	for index in range(sword_swipes.size() - 1, -1, -1):
@@ -448,7 +527,7 @@ func update_projectiles(delta: float) -> void:
 			for j in range(balloons.size() - 1, -1, -1):
 				if balloons[j].id not in p.hit_ids and p.position.distance_to(point_on_path(balloons[j].distance)) < float(balloons[j].get("radius", 24.0)):
 					p.hit_ids.append(balloons[j].id)
-					damage_balloon(j, p.damage)
+					damage_balloon(j, p.damage, str(p.get("damage_type", "physical")))
 			if (p.kind == 1 and p.arc_remaining <= 0.0) or (p.kind == 4 and p.remaining <= 0.0):
 				projectiles.remove_at(i)
 			continue
@@ -464,13 +543,33 @@ func update_projectiles(delta: float) -> void:
 			if p.kind == 2:
 				for j in range(balloons.size() - 1, -1, -1):
 					if point_on_path(balloons[j].distance).distance_to(target_pos) <= 68.0:
-						damage_balloon(j, p.damage)
+						damage_balloon(j, p.damage, str(p.get("damage_type", "physical")))
 			else:
-				damage_balloon(p.target, p.damage)
+				damage_balloon(p.target, p.damage, str(p.get("damage_type", "physical")))
 			projectiles.remove_at(i)
 
-func damage_balloon(index: int, damage: int) -> void:
+func damage_balloon(index: int, damage: int, damage_type := "physical") -> void:
 	if index < 0 or index >= balloons.size():
+		return
+	if balloons[index].get("armored", false):
+		if damage_type == "magic":
+			destroy_armored_balloon(index)
+			return
+		balloons[index].armor_hp -= damage
+		balloons[index].hp = balloons[index].armor_hp
+		game_sound.play_effect("metal", -10.0)
+		if balloons[index].armor_hp <= 0:
+			destroy_armored_balloon(index)
+		return
+	if balloons[index].get("magic_shield", false):
+		if damage_type == "physical":
+			destroy_magic_shield_balloon(index)
+			return
+		balloons[index].shield_hp -= damage
+		balloons[index].hp = balloons[index].shield_hp
+		game_sound.play_effect("saber", -12.0)
+		if balloons[index].shield_hp <= 0:
+			destroy_magic_shield_balloon(index)
 		return
 	game_sound.play_effect("impact", -15.0)
 	# Each health layer is one balloon tier: damage removes that many layers.
@@ -481,10 +580,37 @@ func damage_balloon(index: int, damage: int) -> void:
 		if not balloons[index].get("moab", false):
 			balloons[index].speed = balloons[index].base_speed + balloons[index].tier * 7.0
 		return
+	var destroyed_distance: float = balloons[index].distance
+	var splits_into_two: bool = balloons[index].get("split_on_destroy", false)
+	balloons.remove_at(index)
+	if splits_into_two:
+		spawn_balloon_of_tier(5, destroyed_distance - 12.0)
+		spawn_balloon_of_tier(5, destroyed_distance + 12.0)
+	for other in projectiles:
+		if other.target > index:
+			other.target -= 1
+
+func destroy_armored_balloon(index: int) -> void:
+	if index < 0 or index >= balloons.size():
+		return
+	var destroyed_distance: float = balloons[index].distance
 	balloons.remove_at(index)
 	for other in projectiles:
 		if other.target > index:
 			other.target -= 1
+	for split_index in range(3):
+		spawn_balloon_of_tier(7, destroyed_distance + (split_index - 1) * 18.0)
+
+func destroy_magic_shield_balloon(index: int) -> void:
+	if index < 0 or index >= balloons.size():
+		return
+	var destroyed_distance: float = balloons[index].distance
+	balloons.remove_at(index)
+	for other in projectiles:
+		if other.target > index:
+			other.target -= 1
+	for split_index in range(3):
+		spawn_balloon_of_tier(7, destroyed_distance + (split_index - 1) * 18.0)
 
 func point_on_path(distance: float) -> Vector2:
 	var remaining := distance
@@ -571,6 +697,12 @@ func _input(event: InputEvent) -> void:
 					send_balloon_to_rival(send_option)
 					return
 			if inspected_tower_index >= 0:
+				if Rect2(1195, 850, 42, 36).has_point(mouse):
+					change_inspected_target_mode(-1)
+					return
+				if Rect2(1405, 850, 42, 36).has_point(mouse):
+					change_inspected_target_mode(1)
+					return
 				if Rect2(1300, 950, 145, 58).has_point(mouse):
 					sell_inspected_tower()
 					return
@@ -646,11 +778,11 @@ func place_tower_local(position: Vector2, tower_kind: int) -> void:
 	var config := tower_config(tower_kind)
 	towers.append({
 		"position": position, "range": config.range,
-		"damage": config.damage,
+		"damage": config.damage, "damage_type": config.damage_type,
 		"reload": config.reload,
 		"projectile_speed": config.projectile_speed,
 		"projectile_range": config.projectile_range,
-		"cooldown": 0.0, "banana_timer": 0.0, "color": TOWER_COLORS[tower_kind], "type": tower_kind, "cost": TOWER_COSTS[tower_kind]
+		"cooldown": 0.0, "banana_timer": 0.0, "target_mode": 0, "color": TOWER_COLORS[tower_kind], "type": tower_kind, "cost": TOWER_COSTS[tower_kind]
 	})
 	if multiplayer_mode:
 		active_player = 2 if active_player == 1 else 1
@@ -739,7 +871,11 @@ func send_options() -> Array[Dictionary]:
 		{"tier": 3, "count": 3, "cost": 90, "benefit": 4, "unlock": 9, "label": "Trío veloz"},
 		{"tier": 5, "count": 2, "cost": 140, "benefit": 6, "unlock": 14, "label": "Dúo élite"},
 		{"tier": 4, "count": 4, "cost": 210, "benefit": 8, "unlock": 18, "label": "Escuadrón"},
-		{"tier": 12, "count": 1, "cost": 360, "benefit": 14, "unlock": 22, "label": "MOAB", "moab": true}
+		{"tier": 12, "count": 1, "cost": 360, "benefit": 14, "unlock": 22, "label": "MOAB", "moab": true},
+		{"tier": 6, "count": 1, "cost": 240, "benefit": 10, "unlock": 20, "label": "Divisor"},
+		{"tier": 7, "count": 1, "cost": 290, "benefit": 12, "unlock": 24, "label": "Relámpago"},
+		{"tier": 8, "count": 1, "cost": 460, "benefit": 18, "unlock": 27, "label": "Blindado", "armored": true},
+		{"tier": 8, "count": 1, "cost": 470, "benefit": 18, "unlock": 29, "label": "Escudo mágico", "magic_shield": true}
 	]
 
 func balloon_send_rect(option_index: int) -> Rect2:
@@ -761,6 +897,12 @@ func sell_inspected_tower() -> void:
 	inspected_tower_index = -1
 	game_sound.play_effect("click", -10.0)
 
+func change_inspected_target_mode(direction: int) -> void:
+	if inspected_tower_index < 0 or inspected_tower_index >= towers.size():
+		return
+	towers[inspected_tower_index].target_mode = posmod(int(towers[inspected_tower_index].get("target_mode", 0)) + direction, 4)
+	game_sound.play_effect("click", -12.0)
+
 func send_balloon_to_rival(option_index: int) -> void:
 	var options := send_options()
 	if option_index < 0 or option_index >= options.size():
@@ -773,15 +915,19 @@ func send_balloon_to_rival(option_index: int) -> void:
 	money_popup_time = 1.0
 	beneficios += option.benefit
 	game_sound.play_effect("send")
-	rpc_receive_sent_balloon.rpc(option.tier, option.count, option.get("moab", false))
+	rpc_receive_sent_balloon.rpc(option.tier, option.count, option.get("moab", false), option.get("armored", false), option.get("magic_shield", false))
 
 @rpc("any_peer", "reliable")
-func rpc_receive_sent_balloon(tier: int, count: int, is_moab := false) -> void:
+func rpc_receive_sent_balloon(tier: int, count: int, is_moab := false, is_armored := false, is_magic_shield := false) -> void:
 	for i in range(clampi(count, 1, 5)):
 		if is_moab:
 			spawn_moab(-float(i) * 110.0)
+		elif is_armored:
+			spawn_armored_balloon(-float(i) * 100.0)
+		elif is_magic_shield:
+			spawn_magic_shield_balloon(-float(i) * 100.0)
 		else:
-			spawn_balloon_of_tier(clampi(tier, 1, 5), -float(i) * 70.0)
+			spawn_balloon_of_tier(clampi(tier, 1, 7), -float(i) * 70.0)
 
 func set_requested_game_speed(new_speed: float) -> void:
 	if online_mode:
@@ -850,11 +996,11 @@ func rpc_place_rival_tower(position: Vector2, tower_kind: int) -> void:
 	var config := tower_config(tower_kind)
 	rival_towers.append({
 		"position": position, "range": config.range,
-		"damage": config.damage,
+		"damage": config.damage, "damage_type": config.damage_type,
 		"reload": config.reload,
 		"projectile_speed": config.projectile_speed,
 		"projectile_range": config.projectile_range,
-		"cooldown": 0.0, "banana_timer": 0.0, "color": TOWER_COLORS[tower_kind], "type": tower_kind
+		"cooldown": 0.0, "banana_timer": 0.0, "target_mode": 0, "color": TOWER_COLORS[tower_kind], "type": tower_kind
 	})
 
 func too_close_to_tower(position: Vector2) -> bool:
@@ -899,6 +1045,7 @@ func _draw() -> void:
 	for tower in towers:
 		var tower_texture = tower_texture_for(tower.type)
 		draw_texture_rect(tower_texture, Rect2(tower.position - Vector2(34, 38), Vector2(68, 68)), false)
+	draw_spikes(spikes)
 	for balloon in balloons:
 		draw_balloon(point_on_path(balloon.distance), balloon)
 	for projectile in projectiles:
@@ -945,6 +1092,24 @@ func make_box(color: Color, radius: float) -> StyleBoxFlat:
 	return box
 
 func draw_balloon(position: Vector2, balloon: Dictionary) -> void:
+	if balloon.get("magic_shield", false):
+		var shield_ratio: float = float(balloon.get("shield_hp", 0)) / 32.0
+		draw_circle(position, 34, Color(0.30, 0.40, 1.0, 0.26))
+		draw_circle(position, 29, Color(0.55, 0.35, 0.95, 0.45))
+		draw_circle(position, 21, Color("3e4ca0"))
+		draw_arc(position, 29, 0.0, TAU, 24, Color("b8b5ff"), 3.0)
+		draw_rect(Rect2(position + Vector2(-28, -40), Vector2(56, 6)), Color("263544"))
+		draw_rect(Rect2(position + Vector2(-28, -40), Vector2(56 * shield_ratio, 6)), Color("b9a7ff"))
+		return
+	if balloon.get("armored", false):
+		var armor_ratio: float = float(balloon.get("armor_hp", 0)) / 32.0
+		draw_style_box(make_box(Color("202b35"), 12), Rect2(position - Vector2(32, 27), Vector2(64, 54)))
+		draw_style_box(make_box(Color("778b98"), 10), Rect2(position - Vector2(27, 22), Vector2(54, 44)))
+		draw_line(position + Vector2(-18, -10), position + Vector2(18, 10), Color("c9d8df"), 4.0)
+		draw_line(position + Vector2(-18, 10), position + Vector2(18, -10), Color("c9d8df"), 4.0)
+		draw_rect(Rect2(position + Vector2(-28, -38), Vector2(56, 6)), Color("263544"))
+		draw_rect(Rect2(position + Vector2(-28, -38), Vector2(56 * armor_ratio, 6)), Color("b7d9e6"))
+		return
 	if balloon.get("moab", false):
 		var integrity := float(balloon.tier) / maxf(1.0, float(balloon.get("max_hp", balloon.tier)))
 		draw_style_box(make_box(Color("172638"), 12), Rect2(position - Vector2(42, 27), Vector2(84, 54)))
@@ -953,7 +1118,7 @@ func draw_balloon(position: Vector2, balloon: Dictionary) -> void:
 		draw_string(ThemeDB.fallback_font, position + Vector2(-25, 10), "MOAB", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
 		return
 	# Index 0 is unused so a balloon's tier maps directly to its colour.
-	var colors := [Color("ef5e62"), Color("478fe4"), Color("f5d35d"), Color("a97cdd"), Color("7bd4bf"), Color("ee8f54")]
+	var colors := [Color("ef5e62"), Color("478fe4"), Color("f5d35d"), Color("a97cdd"), Color("7bd4bf"), Color("ee8f54"), Color("773b68"), Color("f5f7ff")]
 	var tier_index := clampi(int(balloon.tier), 0, colors.size() - 1)
 	var color: Color = colors[tier_index]
 	draw_circle(position, 15 + balloon.tier * 2, Color("263544"))
@@ -1177,6 +1342,8 @@ func draw_duel_arena(origin: Vector2, arena_towers: Array, arena_balloons: Array
 	for projectile in arena_projectiles:
 		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT), projectile.kind)
 	if arena_towers == towers:
+		draw_spikes(spikes)
+	if arena_towers == towers:
 		draw_sword_swipes(origin, Vector2(0.75, 0.75))
 
 func draw_dart(position: Vector2, color: Color, direction: Vector2, kind := 0) -> void:
@@ -1198,6 +1365,12 @@ func draw_sword_swipes(origin: Vector2, scale: Vector2) -> void:
 		draw_arc(swipe.position, 90.0, swipe.angle - PI * 0.5, swipe.angle + PI * 0.5, 22, Color(1.0, 0.88, 0.55, alpha), 8.0)
 		draw_arc(swipe.position, 76.0, swipe.angle - PI * 0.5, swipe.angle + PI * 0.5, 22, Color(1.0, 1.0, 1.0, alpha), 2.5)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+func draw_spikes(spike_list: Array) -> void:
+	for spike in spike_list:
+		var point: Vector2 = spike.position
+		draw_colored_polygon(PackedVector2Array([point + Vector2(-7, 6), point + Vector2(0, -8), point + Vector2(7, 6)]), Color("dbe8ed"))
+		draw_polyline(PackedVector2Array([point + Vector2(-7, 6), point + Vector2(0, -8), point + Vector2(7, 6)]), Color("415260"), 2.0)
 
 func draw_bananas() -> void:
 	draw_banana_group(Vector2(0, 270), bananas)
@@ -1430,10 +1603,21 @@ func draw_map_coin_toss() -> void:
 	draw_circle(Vector2.ZERO, 145.0, Color("f4c75d"))
 	draw_circle(Vector2.ZERO, 128.0, Color("d99235"))
 	draw_circle(Vector2.ZERO, 111.0, Color("f8d77a"))
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	if width_scale > 0.28:
-		draw_centered("CARA" if face_is_heads else "CRUZ", Vector2(960, 485), 35, Color("6a4523"))
-		draw_centered("ANFITRION" if face_is_heads else "UNIDO", Vector2(960, 525), 20, Color("6a4523"))
+		if face_is_heads:
+			# Anverso: un rostro grabado en la moneda.
+			draw_circle(Vector2(-38, -22), 12, Color("6a4523"))
+			draw_circle(Vector2(38, -22), 12, Color("6a4523"))
+			draw_circle(Vector2(-38, -22), 4, Color("f8d77a"))
+			draw_circle(Vector2(38, -22), 4, Color("f8d77a"))
+			draw_arc(Vector2(0, 8), 52, 0.18, PI - 0.18, 18, Color("6a4523"), 9.0)
+			draw_line(Vector2(-58, -62), Vector2(0, -78), Color("6a4523"), 8.0)
+			draw_line(Vector2(0, -78), Vector2(58, -62), Color("6a4523"), 8.0)
+		else:
+			# Reverso: una cruz naval grabada.
+			draw_line(Vector2(0, -72), Vector2(0, 72), Color("6a4523"), 19.0)
+			draw_line(Vector2(-58, -20), Vector2(58, -20), Color("6a4523"), 19.0)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	if landing:
 		draw_centered("%s · %s" % ["CARA" if map_coin_heads else "CRUZ", MapCatalogScript.NAMES[map_coin_host_vote if map_coin_heads else map_coin_join_vote]], Vector2(960, 720), 28, Color.WHITE)
 
@@ -1638,7 +1822,7 @@ func draw_duel_tabs(font: Font) -> void:
 
 func draw_balloon_send_buttons(font: Font) -> void:
 	var options := send_options()
-	var colors := [Color.WHITE, Color("478fe4"), Color("f5d35d"), Color("a97cdd"), Color("7bd4bf"), Color("ee8f54")]
+	var colors := [Color.WHITE, Color("478fe4"), Color("f5d35d"), Color("a97cdd"), Color("7bd4bf"), Color("ee8f54"), Color("773b68"), Color("f5f7ff")]
 	var visible_area := Rect2(18, 845, 700, 220)
 	for index in range(options.size()):
 		var option: Dictionary = options[index]
@@ -1648,7 +1832,7 @@ func draw_balloon_send_buttons(font: Font) -> void:
 		var unlocked: bool = wave >= option.unlock
 		var fill := Color("6f353d") if unlocked and money < option.cost else Color("1d4055") if unlocked else Color("4c515a")
 		draw_style_box(make_box(fill, 10), rect)
-		var icon_color: Color = Color("3f83ba") if option.get("moab", false) else colors[clampi(option.tier, 1, colors.size() - 1)]
+		var icon_color: Color = Color("9a7ee8") if option.get("magic_shield", false) else Color("778b98") if option.get("armored", false) else Color("3f83ba") if option.get("moab", false) else colors[clampi(option.tier, 1, colors.size() - 1)]
 		if not unlocked: icon_color = icon_color.darkened(0.65)
 		draw_circle(rect.position + Vector2(38, 45), 24, icon_color)
 		draw_string(font, rect.position + Vector2(72, 31), option.label, HORIZONTAL_ALIGNMENT_LEFT, 130, 15, Color.WHITE if unlocked else Color("b2b6bb"))
@@ -1676,6 +1860,14 @@ func draw_inspected_tower_menu() -> void:
 	draw_texture_rect(tower_texture_for(kind), Rect2(995, 790, 88, 88), false)
 	draw_string(font, Vector2(1100, 810), TOWER_NAMES[kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 25, Color.WHITE)
 	draw_string(font, Vector2(1100, 842), "Daño %d · Alcance %d" % [tower.damage, tower.range], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("bdd1de"))
+	var target_modes := ["PRIMERO", "ÚLTIMO", "MÁS FUERTE", "MÁS DÉBIL"]
+	var target_mode: int = int(tower.get("target_mode", 0))
+	draw_string(font, Vector2(995, 877), "OBJETIVO", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("9ebfcf"))
+	draw_style_box(make_box(Color("294a60"), 8), Rect2(1195, 850, 42, 36))
+	draw_style_box(make_box(Color("294a60"), 8), Rect2(1405, 850, 42, 36))
+	draw_string(font, Vector2(1208, 877), "‹", HORIZONTAL_ALIGNMENT_LEFT, -1, 27, Color.WHITE)
+	draw_string(font, Vector2(1418, 877), "›", HORIZONTAL_ALIGNMENT_LEFT, -1, 27, Color.WHITE)
+	draw_centered(target_modes[target_mode], Vector2(1321, 876), 17, Color("f4d66d"))
 	draw_style_box(make_box(Color("35475a"), 9), Rect2(995, 895, 140, 72))
 	draw_style_box(make_box(Color("35475a"), 9), Rect2(1148, 895, 140, 72))
 	draw_string(font, Vector2(1008, 925), "MEJORA 1", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("d9eef4"))
@@ -1715,5 +1907,5 @@ func draw_placement_preview() -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 func tower_texture_for(kind: int):
-	var textures := [DART_RANGER_TEXTURE, BOOMERANG_SCOUT_TEXTURE, BOMBARDIER_TEXTURE, LIGHTNING_MAGE_TEXTURE, MYSTIC_ARCHER_TEXTURE, BANANA_FARMER_TEXTURE, REEF_MEDIC_TEXTURE, PIRATE_TEXTURE]
+	var textures := [DART_RANGER_TEXTURE, BOOMERANG_SCOUT_TEXTURE, BOMBARDIER_TEXTURE, LIGHTNING_MAGE_TEXTURE, MYSTIC_ARCHER_TEXTURE, BANANA_FARMER_TEXTURE, REEF_MEDIC_TEXTURE, PIRATE_TEXTURE, PATHCUTTER_TEXTURE]
 	return textures[kind]

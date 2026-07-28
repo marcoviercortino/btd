@@ -11,7 +11,7 @@ place_tower.wav::AudioStreamWAV::3703512693728358831::1785236042::1785236131::1:
 send_balloon.wav::AudioStreamWAV::7514512276909071101::1785236042::1785236131::1::::<><><>0<>0<>d52f23d38707088104240cd11c85f81d<>res://.godot/imported/send_balloon.wav-e3873609d3eb151bc388dad1225e60d6.sample::
 ui_click.wav::AudioStreamWAV::1173130753271007598::1785236042::1785236131::1::::<><><>0<>0<>f6bdefb2b197692c8a973fa1c59a0c77<>res://.godot/imported/ui_click.wav-27a1a14815f4272c438d6dd4385cee0b.sample::
 win.wav::AudioStreamWAV::7009733460974715173::1785236042::1785236131::1::::<><><>0<>0<>4472b016e24ddb31ffdfaf2b30b57e5b<>res://.godot/imported/win.wav-ed9b591a574a24bf30e29686ed78ad6a.sample::
-::res://assets/characters/::1785245644
+::res://assets/characters/::1785248051
 banana_farmer.svg::CompressedTexture2D::7994041028861437499::1785236215::1785236245::1::::<><><>0<>0<>d1a991411e3436ba16aeb48b12b537e9<>res://.godot/imported/banana_farmer.svg-e5813e743d9d0e67a1dfd78c0a469962.ctex::
 bombardier.png::CompressedTexture2D::4231679078167601598::1785200752::1785201004::1::::<><><>0<>0<>b2a66c2690b16e1dd0a45181d81d4669<>res://.godot/imported/bombardier.png-a50d513503b222a5efd5fd0e59ca7d7f.ctex::
 bombardier.svg::CompressedTexture2D::7247132365161593677::1785200835::1785201004::1::::<><><>0<>0<>386c23c69c490cbc62112cf08bd82e86<>res://.godot/imported/bombardier.svg-b44c44a8e464dc7aadf096845f660f24.ctex::
@@ -26,7 +26,8 @@ lightning_mage_key.png::CompressedTexture2D::6486782488511381481::1785200751::17
 mystic_archer.png::CompressedTexture2D::4382490168205078561::1785200756::1785201004::1::::<><><>0<>0<>dbbe511fdb67bf8f5028d213c6593125<>res://.godot/imported/mystic_archer.png-a641bb2dd74300499593f568d147c881.ctex::
 mystic_archer.svg::CompressedTexture2D::3347333521530816162::1785200837::1785201004::1::::<><><>0<>0<>2e493639c157cf219d416bf5189420df<>res://.godot/imported/mystic_archer.svg-5cb5ff96c19163c18966206e84c0252d.ctex::
 mystic_archer_key.png::CompressedTexture2D::5196034590404978716::1785200751::1785201004::1::::<><><>0<>0<>f54099417d6d5fe2e6cff3896961dee7<>res://.godot/imported/mystic_archer_key.png-1a118d5090427144d50dc2ea114fa72b.ctex::
-pirate.svg::CompressedTexture2D::3361058319624023473::1785245633::1785245644::1::::<><><>0<>0<>d173d5510ce402472ef6d0bd51c7aa05<>res://.godot/imported/pirate.svg-b757e25d098aea05a5280724799ba91a.ctex::
+pathcutter.svg::CompressedTexture2D::8609962409188809472::1785248041::1785248051::1::::<><><>0<>0<>77b9149e4e06ab5500b9c40c8ca67a4f<>res://.godot/imported/pathcutter.svg-be8985c358459747483cbb5c58cec567.ctex::
+pirate.svg::CompressedTexture2D::3361058319624023473::1785245633::1785246111::1::::<><><>0<>0<>d173d5510ce402472ef6d0bd51c7aa05<>res://.godot/imported/pirate.svg-b757e25d098aea05a5280724799ba91a.ctex::
 reef_medic.svg::CompressedTexture2D::6508252138229598948::1785236120::1785236169::1::::<><><>0<>0<>a52810ebf10cfdd0771b1fda12367360<>res://.godot/imported/reef_medic.svg-40eea4eb00b3736a3afb97fead75004e.ctex::
 tide_captain.svg::CompressedTexture2D::1036980251228338863::1785236121::1785236169::1::::<><><>0<>0<>8c51cc3e526bf677b6628f1299a43bb5<>res://.godot/imported/tide_captain.svg-e4c7076b49bb375c8d6aa8214f5310f5.ctex::
 ::res://assets/maps/::1785245531
@@ -38,10 +39,10 @@ boomerang.svg::CompressedTexture2D::6446661899332057263::1785242213::1785242226:
 ::res://export_templates/::1785187356
 ::res://feature_profiles/::1785187356
 ::res://scripts/::1785241106
-game_sound.gd::GDScript::2658819998818871204::1785236066::0::1::::GameSound<>Node<><>0<>0<><>::
-main.gd::GDScript::3190628593635555509::1785246016::0::1::::<>Node2D<><>0<>0<><>::
+game_sound.gd::GDScript::2658819998818871204::1785248532::0::1::::GameSound<>Node<><>0<>0<><>::
+main.gd::GDScript::3190628593635555509::1785248515::0::1::::<>Node2D<><>0<>0<><>::
 map_catalog.gd::GDScript::7564190244940966043::1785245337::0::1::::MapCatalog<>RefCounted<><>0<>0<><>::
 remote_prediction.gd::GDScript::6028864848802364766::1785242848::0::1::::RemotePrediction<>RefCounted<><>0<>0<><>::
-tower_catalog.gd::GDScript::8982837337347372000::1785245631::0::1::::TowerCatalog<>RefCounted<><>0<>0<><>::
+tower_catalog.gd::GDScript::8982837337347372000::1785248001::0::1::::TowerCatalog<>RefCounted<><>0<>0<><>::
 ::res://script_templates/::1785187356
 ::res://text_editor_themes/::1785187356
