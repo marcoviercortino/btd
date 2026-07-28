@@ -32,3 +32,30 @@ static func upgrades(kind: int) -> Array:
 		[{"name":"Púas dentadas", "description":"Cada púa hace +1 daño.", "cost":280, "damage":1}, {"name":"Sembradora", "description":"Suelta dos púas extra por tanda.", "cost":460, "spike_count":2}, {"name":"Alfombra de acero", "description":"Coloca púas mucho más rápido.", "cost":800, "reload_mult":0.72}]
 	]
 	return paths[kind]
+
+static func upgrade_branches(kind: int) -> Array:
+	var base_name: String = NAMES[kind]
+	var branches: Array = []
+	var names := [["Potencia", "Impacto", "Arma experta", "Dominio", "DEFINITIVA: Leyenda"], ["Alcance", "Vista aguda", "Control", "Territorio", "DEFINITIVA: Horizonte"], ["Cadencia", "Ritmo vivo", "Aceleración", "Furia", "DEFINITIVA: Tormenta"]]
+	var descriptions := [["Aumenta el poder base.", "Golpes más contundentes.", "Refuerza su habilidad principal.", "Gran mejora ofensiva.", "Poder máximo para " + base_name + "."], ["Amplía su zona de influencia.", "Mejor control del campo.", "Alcance y eficiencia extra.", "Domina una zona mayor.", "Alcance definitivo de " + base_name + "."], ["Reduce el tiempo entre acciones.", "Actúa con mayor rapidez.", "Mejora su ritmo de ataque.", "Cadencia muy alta.", "Velocidad definitiva de " + base_name + "."]]
+	for branch in range(3):
+		var levels: Array = []
+		for level in range(5):
+			var final := level == 4
+			var data := {"name": names[branch][level], "description": descriptions[branch][level], "cost": [180, 320, 560, 950, 2600][level], "final": final, "branch": branch}
+			if branch == 0:
+				data["damage"] = 2 if final else 1
+				data["banana_value"] = 35 if final else 8
+				data["heal"] = 8 if final else 2
+				data["spike_count"] = 3 if final else 1
+			elif branch == 1:
+				data["range"] = 75 if final else 18
+				data["projectile_range"] = 120 if final else 30
+				data["explosion"] = 24 if final else 6
+				data["chain"] = 2 if final else 1
+			else:
+				data["reload_mult"] = 0.55 if final else 0.88
+				data["banana_interval"] = -2 if final else -0.5
+			levels.append(data)
+		branches.append({"name": ["PODER", "ALCANCE", "RITMO"][branch], "levels": levels})
+	return branches

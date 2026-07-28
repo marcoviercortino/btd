@@ -38,6 +38,7 @@ var lightning_effects: Array[Dictionary] = []
 var sword_swipes: Array[Dictionary] = []
 var spikes: Array[Dictionary] = []
 var upgrade_effects: Array[Dictionary] = []
+var ultimate_tower_types: Dictionary = {}
 var rival_sword_swipes: Array[Dictionary] = []
 var rival_spikes: Array[Dictionary] = []
 var bananas: Array[Dictionary] = []
@@ -1010,7 +1011,7 @@ func _input(event: InputEvent) -> void:
 					sell_inspected_tower()
 					return
 				if Rect2(995, 905, 450, 55).has_point(mouse):
-					upgrade_inspected_tower()
+					upgrade_inspected_tower(clampi(int((mouse.x - 995.0) / 150.0), 0, 2))
 					return
 				if Rect2(1455, 790, 55, 42).has_point(mouse):
 					inspected_tower_index = -1
@@ -1102,7 +1103,7 @@ func place_tower_local(position: Vector2, tower_kind: int) -> void:
 		"reload": config.reload,
 		"projectile_speed": config.projectile_speed,
 		"projectile_range": config.projectile_range, "thermal_vision": config.thermal_vision,
-		"cooldown": 0.0, "banana_timer": 0.0, "target_mode": 0, "upgrade_level": 0, "banana_value": 30, "banana_interval": 8.0, "heal_amount": 8, "chain_hits": 5, "explosion_radius": 68.0, "spike_count": 4, "damage_dealt": 0, "bloons_popped": 0, "color": TOWER_COLORS[tower_kind], "type": tower_kind, "cost": TOWER_COSTS[tower_kind]
+		"cooldown": 0.0, "banana_timer": 0.0, "target_mode": 0, "primary_branch": -1, "secondary_branch": -1, "branch_levels": [0, 0, 0], "banana_value": 30, "banana_interval": 8.0, "heal_amount": 8, "chain_hits": 5, "explosion_radius": 68.0, "spike_count": 4, "damage_dealt": 0, "bloons_popped": 0, "color": TOWER_COLORS[tower_kind], "type": tower_kind, "cost": TOWER_COSTS[tower_kind]
 	})
 	if multiplayer_mode:
 		active_player = 2 if active_player == 1 else 1
@@ -1220,22 +1221,51 @@ func sell_inspected_tower() -> void:
 	inspected_tower_index = -1
 	game_sound.play_money_effect()
 
-func upgrade_inspected_tower() -> void:
+func upgrade_inspected_tower(branch: int) -> void:
 	if inspected_tower_index < 0 or inspected_tower_index >= towers.size():
 		return
 	var tower: Dictionary = towers[inspected_tower_index]
-	var upgrades := TowerCatalogScript.upgrades(int(tower.type))
-	var level: int = int(tower.get("upgrade_level", 0))
-	if level >= upgrades.size():
+	var primary: int = int(tower.get("primary_branch", -1))
+	var secondary: int = int(tower.get("secondary_branch", -1))
+	var levels: Array = tower.get("branch_levels", [0, 0, 0])
+	var level: int = int(levels[branch])
+	var used_branches := 0
+	for branch_level in levels:
+		if int(branch_level) > 0:
+			used_branches += 1
+	# Before a main branch exists, either of two branches can be explored.
+	# The third is blocked only once two different paths have upgrades.
+	if level == 0 and used_branches >= 2:
 		return
-	var upgrade: Dictionary = upgrades[level]
-	var cost: int = int(upgrade.cost)
+	if primary >= 0 and branch != primary:
+		if secondary >= 0 and branch != secondary:
+			return
+		if secondary < 0:
+			secondary = branch
+			tower.secondary_branch = branch
+	var max_level: int = 5 if branch == primary else 3 if primary < 0 else 2
+	if level >= max_level:
+		return
+	var branches: Array = TowerCatalogScript.upgrade_branches(int(tower.type))
+	var upgrade: Dictionary = branches[branch].levels[level]
+	if bool(upgrade.get("final", false)) and ultimate_tower_types.has(int(tower.type)):
+		return
+	var cost: int = int(upgrade.get("cost", 0))
 	if money < cost:
 		return
 	money -= cost
 	money_popup_amount = cost
 	money_popup_time = 1.0
-	tower.upgrade_level = level + 1
+	levels[branch] = level + 1
+	tower.branch_levels = levels
+	# The first branch reaching its third upgrade becomes the main path; the
+	# other explored path remains available only through its second upgrade.
+	if primary < 0 and int(levels[branch]) >= 3:
+		tower.primary_branch = branch
+		for other_branch in range(3):
+			if other_branch != branch and int(levels[other_branch]) > 0:
+				tower.secondary_branch = other_branch
+				break
 	tower.cost = int(tower.get("cost", 0)) + cost
 	tower.damage += int(upgrade.get("damage", 0))
 	tower.range += float(upgrade.get("range", 0.0))
@@ -1248,6 +1278,8 @@ func upgrade_inspected_tower() -> void:
 	tower.spike_count = int(tower.get("spike_count", 4)) + int(upgrade.get("spike_count", 0))
 	if upgrade.has("reload_mult"):
 		tower.reload *= float(upgrade.reload_mult)
+	if bool(upgrade.get("final", false)):
+		ultimate_tower_types[int(tower.type)] = true
 	upgrade_effects.append({"position": tower.position, "time": 0.9, "color": TOWER_COLORS[int(tower.type)], "title": str(upgrade.name)})
 	game_sound.play_debug_effect("wave_jump")
 
@@ -1671,11 +1703,11 @@ func make_box(color: Color, radius: float) -> StyleBoxFlat:
 
 func draw_balloon(position: Vector2, balloon: Dictionary) -> void:
 	if balloon.get("regenerative", false):
-		var heart_radius := 13.0 + float(balloon.get("tier", 1)) * 2.0
+		var heart_radius := (13.0 + float(balloon.get("tier", 1)) * 2.0) * 1.28
 		if balloon.get("moab", false):
-			heart_radius = 42.0
+			heart_radius = 54.0
 		elif balloon.get("armored", false) or balloon.get("magic_shield", false) or balloon.get("ceramic_shell", false):
-			heart_radius = 31.0
+			heart_radius = 40.0
 		draw_regenerative_heart(position, balloon, heart_radius)
 		draw_camouflage_pattern(position, balloon, heart_radius)
 		return
@@ -2660,18 +2692,18 @@ func draw_inspected_tower_menu() -> void:
 		draw_string(font, Vector2(1418, 867), "›", HORIZONTAL_ALIGNMENT_LEFT, -1, 27, Color.WHITE)
 		draw_centered(target_modes[target_mode], Vector2(1321, 866), 17, Color("f4d66d"))
 	draw_string(font, Vector2(995, 896), "Daño total: %d   ·   Globos explotados: %d" % [int(tower.get("damage_dealt", 0)), int(tower.get("bloons_popped", 0))], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("d9eef4"))
-	var upgrades: Array = TowerCatalogScript.upgrades(kind)
-	var upgrade_level: int = clampi(int(tower.get("upgrade_level", 0)), 0, upgrades.size())
-	if upgrade_level < upgrades.size():
-		var next_upgrade: Dictionary = upgrades[upgrade_level]
-		var upgrade_cost: int = int(next_upgrade.get("cost", 0))
-		var can_buy_upgrade: bool = money >= upgrade_cost
-		draw_style_box(make_box(Color("4b7d9e") if can_buy_upgrade else Color("6f353d"), 9), Rect2(995, 905, 450, 55))
-		draw_string(font, Vector2(1008, 929), "MEJORA %d/3 · %s · $%d" % [upgrade_level + 1, str(next_upgrade.get("name", "Mejora")), upgrade_cost], HORIZONTAL_ALIGNMENT_LEFT, 425, 16, Color.WHITE)
-		draw_string(font, Vector2(1008, 950), str(next_upgrade.get("description", "Mejora de torre")), HORIZONTAL_ALIGNMENT_LEFT, 425, 13, Color("d9eef4"))
-	else:
-		draw_style_box(make_box(Color("4b9b78"), 9), Rect2(995, 905, 450, 55))
-		draw_centered("MEJORAS COMPLETAS · NIVEL 3", Vector2(1220, 939), 17, Color.WHITE)
+	var branches: Array = TowerCatalogScript.upgrade_branches(kind)
+	var levels: Array = tower.get("branch_levels", [0, 0, 0])
+	var primary_branch: int = int(tower.get("primary_branch", -1))
+	var secondary_branch: int = int(tower.get("secondary_branch", -1))
+	for branch in range(3):
+		var rect := Rect2(995 + branch * 150, 905, 145, 55)
+		var level: int = int(levels[branch])
+		var role := "PRINCIPAL" if branch == primary_branch else "SECUNDARIA" if branch == secondary_branch else "ELEGIR"
+		var color := Color("4b7d9e") if branch == primary_branch else Color("76543a") if branch == secondary_branch else Color("35475a")
+		draw_style_box(make_box(color, 8), rect)
+		draw_centered(str(branches[branch].name), rect.get_center() + Vector2(0, -8), 15, Color.WHITE)
+		draw_centered("%s %d/%d" % [role, level, 5 if branch == primary_branch else 2 if branch == secondary_branch else 0], rect.get_center() + Vector2(0, 14), 12, Color("d9eef4"))
 	var refund: int = int(round(float(tower.get("cost", 0)) * 0.6))
 	draw_style_box(make_box(Color("843d45"), 9), Rect2(1300, 965, 145, 58))
 	draw_string(font, Vector2(1320, 1001), "VENDER $%d" % refund, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
