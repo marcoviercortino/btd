@@ -37,6 +37,7 @@ var projectiles: Array[Dictionary] = []
 var lightning_effects: Array[Dictionary] = []
 var sword_swipes: Array[Dictionary] = []
 var spikes: Array[Dictionary] = []
+var upgrade_effects: Array[Dictionary] = []
 var rival_sword_swipes: Array[Dictionary] = []
 var rival_spikes: Array[Dictionary] = []
 var bananas: Array[Dictionary] = []
@@ -113,6 +114,12 @@ var debug_mode := false
 var local_debug_vote := 0
 var rival_debug_vote := 0
 var debug_paused := false
+var debug_invulnerable := false
+var debug_tab := 0
+var debug_spawn_kind := -1
+var debug_spawn_camouflaged := false
+var debug_spawn_regenerative := false
+var debug_hover_balloon := -1
 var local_pause_vote := 0
 var rival_pause_vote := 0
 var debug_wave_input := ""
@@ -189,6 +196,7 @@ func _process(delta: float) -> void:
 	update_projectiles(gameplay_delta)
 	update_lightning_effects(gameplay_delta)
 	update_sword_swipes(gameplay_delta)
+	update_upgrade_effects(gameplay_delta)
 	if online_mode:
 		net_sync_timer -= delta
 		if net_sync_timer <= 0.0:
@@ -387,7 +395,8 @@ func update_balloons(delta: float) -> void:
 		if i >= balloons.size():
 			continue
 		if balloons[i].distance >= path_total:
-			lives -= int(balloons[i].get("leak_damage", balloons[i].tier))
+			if not debug_invulnerable:
+				lives -= int(balloons[i].get("leak_damage", balloons[i].tier))
 			balloons.remove_at(i)
 			if lives <= 0:
 				lives = 0
@@ -487,7 +496,7 @@ func update_towers(delta: float) -> void:
 		tower.cooldown -= delta
 		if tower.type == 6:
 			if tower.cooldown <= 0.0:
-				lives = min(150, lives + 8)
+				lives = min(150, lives + int(tower.get("heal_amount", 8)))
 				tower.cooldown = tower.reload
 			continue
 		if tower.type == 8:
@@ -560,9 +569,9 @@ func update_banana_farms(delta: float) -> void:
 		if farm.type != 5:
 			continue
 		farm.banana_timer += delta
-		if farm.banana_timer >= 8.0:
+		if farm.banana_timer >= float(farm.get("banana_interval", 8.0)):
 			farm.banana_timer = 0.0
-			bananas.append({"id": next_banana_id, "position": farm.position + Vector2(rng.randf_range(-34, 34), rng.randf_range(-28, 28)), "value": 30, "age": 0.0, "brown_stage": 0, "collecting": false})
+			bananas.append({"id": next_banana_id, "position": farm.position + Vector2(rng.randf_range(-34, 34), rng.randf_range(-28, 28)), "value": int(farm.get("banana_value", 30)), "age": 0.0, "brown_stage": 0, "collecting": false})
 			next_banana_id += 1
 	if banana_popup_time > 0.0:
 		banana_popup_time -= delta
@@ -588,7 +597,8 @@ func cast_chain_lightning(origin: Vector2, first_target: int, owner_index: int) 
 	var chain_points: Array[Vector2] = [origin]
 	var used: Array[int] = []
 	var current_index := first_target
-	for _jump in range(5):
+	var max_jumps: int = int(towers[owner_index].get("chain_hits", 5)) if owner_index >= 0 and owner_index < towers.size() else 5
+	for _jump in range(max_jumps):
 		if current_index < 0 or current_index >= balloons.size():
 			break
 		chain_points.append(point_on_path(balloons[current_index].distance))
@@ -629,7 +639,8 @@ func drop_path_spikes(origin: Vector2, tower_range: float, owner_index: int) -> 
 		var drop_position := point_on_path(rng.randf_range(0.0, path_total))
 		if origin.distance_to(drop_position) > tower_range or spike_density(drop_position) >= 50:
 			continue
-		for _spike in range(4):
+		var spike_count: int = int(towers[owner_index].get("spike_count", 4)) if owner_index >= 0 and owner_index < towers.size() else 4
+		for _spike in range(spike_count):
 			spikes.append({"position": drop_position + Vector2(rng.randf_range(-8, 8), rng.randf_range(-8, 8)), "owner": owner_index})
 		return
 
@@ -676,8 +687,12 @@ func update_projectiles(delta: float) -> void:
 			p.direction = movement.normalized()
 		if p.position.distance_to(target_pos) < 15.0:
 			if p.kind == 2:
+				var explosion_radius := 68.0
+				var explosion_owner: int = int(p.get("owner", -1))
+				if explosion_owner >= 0 and explosion_owner < towers.size():
+					explosion_radius = float(towers[explosion_owner].get("explosion_radius", 68.0))
 				for j in range(balloons.size() - 1, -1, -1):
-					if point_on_path(balloons[j].distance).distance_to(target_pos) <= 68.0:
+					if point_on_path(balloons[j].distance).distance_to(target_pos) <= explosion_radius:
 						damage_balloon(j, p.damage, str(p.get("damage_type", "physical")), int(p.get("owner", -1)))
 			else:
 				damage_balloon(p.target, p.damage, str(p.get("damage_type", "physical")), int(p.get("owner", -1)))
@@ -846,7 +861,9 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and game_sound:
 		game_sound.play_effect("click", -14.0)
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT and online_mode:
-		if placement_tower >= 0:
+		if debug_spawn_kind >= 0:
+			debug_spawn_kind = -1
+		elif placement_tower >= 0:
 			placement_tower = -1
 		else:
 			inspected_tower_index = -1
@@ -856,6 +873,7 @@ func _input(event: InputEvent) -> void:
 		cursor_position = event.position
 		if online_mode:
 			hover_tower = tower_button_at(cursor_position)
+			debug_hover_balloon = debug_balloon_button_at(cursor_position)
 		queue_redraw()
 	if event is InputEventMouseButton and event.pressed and online_mode and active_duel_tab == 1:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
@@ -922,14 +940,38 @@ func _input(event: InputEvent) -> void:
 				set_requested_debug_mode()
 				return
 			if debug_mode:
-				if Rect2(1460, 315, 180, 50).has_point(mouse):
+				if Rect2(1440, 305, 180, 35).has_point(mouse):
+					debug_tab = 0
+					debug_spawn_kind = -1
+					return
+				if Rect2(1630, 305, 180, 35).has_point(mouse):
+					debug_tab = 1
+					return
+				if debug_tab == 1:
+					var debug_option := debug_balloon_button_at(mouse)
+					if debug_option >= 0:
+						debug_spawn_kind = int(debug_balloon_options()[debug_option].kind)
+						return
+					if Rect2(1460, 700, 155, 42).has_point(mouse):
+						debug_spawn_camouflaged = not debug_spawn_camouflaged
+						return
+					if Rect2(1630, 700, 155, 42).has_point(mouse):
+						debug_spawn_regenerative = not debug_spawn_regenerative
+						return
+				if debug_tab == 0 and Rect2(1460, 355, 180, 50).has_point(mouse):
 					request_debug_pause_toggle()
 					return
-				if Rect2(1460, 385, 130, 50).has_point(mouse):
+				if debug_tab == 0 and Rect2(1460, 425, 130, 50).has_point(mouse):
 					editing_field = "debug_wave"
 					return
-				if Rect2(1605, 385, 160, 50).has_point(mouse):
+				if debug_tab == 0 and Rect2(1605, 425, 160, 50).has_point(mouse):
 					request_debug_wave(debug_wave_input.to_int())
+					return
+				if debug_tab == 0 and Rect2(1460, 495, 145, 50).has_point(mouse):
+					grant_debug_money()
+					return
+				if debug_tab == 0 and Rect2(1620, 495, 145, 50).has_point(mouse):
+					toggle_debug_invulnerability()
 					return
 				if pending_debug_wave >= 0:
 					if Rect2(1460, 475, 140, 50).has_point(mouse):
@@ -966,6 +1008,9 @@ func _input(event: InputEvent) -> void:
 				if Rect2(1300, 965, 145, 58).has_point(mouse):
 					sell_inspected_tower()
 					return
+				if Rect2(995, 905, 450, 55).has_point(mouse):
+					upgrade_inspected_tower()
+					return
 				if Rect2(1455, 790, 55, 42).has_point(mouse):
 					inspected_tower_index = -1
 					return
@@ -986,6 +1031,13 @@ func _input(event: InputEvent) -> void:
 				return
 			if Rect2(0, 270, 960, 540).has_point(mouse):
 				var duel_position := (mouse - Vector2(0, 270)) / Vector2(0.75, 0.75)
+				if debug_spawn_kind >= 0:
+					var spawn_distance := debug_path_distance(duel_position)
+					if spawn_distance >= 0.0:
+						place_debug_balloon(spawn_distance)
+					else:
+						debug_spawn_kind = -1
+					return
 				if placement_tower >= 0:
 					if can_place_tower(duel_position, placement_tower):
 						place_tower(duel_position)
@@ -1001,7 +1053,9 @@ func _input(event: InputEvent) -> void:
 				if inspected_tower_index >= 0:
 					inspected_tower_index = -1
 					return
-			if placement_tower >= 0:
+			if debug_spawn_kind >= 0:
+				debug_spawn_kind = -1
+			elif placement_tower >= 0:
 				placement_tower = -1
 			elif inspected_tower_index >= 0:
 				inspected_tower_index = -1
@@ -1047,7 +1101,7 @@ func place_tower_local(position: Vector2, tower_kind: int) -> void:
 		"reload": config.reload,
 		"projectile_speed": config.projectile_speed,
 		"projectile_range": config.projectile_range, "thermal_vision": config.thermal_vision,
-		"cooldown": 0.0, "banana_timer": 0.0, "target_mode": 0, "damage_dealt": 0, "bloons_popped": 0, "color": TOWER_COLORS[tower_kind], "type": tower_kind, "cost": TOWER_COSTS[tower_kind]
+		"cooldown": 0.0, "banana_timer": 0.0, "target_mode": 0, "upgrade_level": 0, "banana_value": 30, "banana_interval": 8.0, "heal_amount": 8, "chain_hits": 5, "explosion_radius": 68.0, "spike_count": 4, "damage_dealt": 0, "bloons_popped": 0, "color": TOWER_COLORS[tower_kind], "type": tower_kind, "cost": TOWER_COSTS[tower_kind]
 	})
 	if multiplayer_mode:
 		active_player = 2 if active_player == 1 else 1
@@ -1165,6 +1219,43 @@ func sell_inspected_tower() -> void:
 	inspected_tower_index = -1
 	game_sound.play_money_effect()
 
+func upgrade_inspected_tower() -> void:
+	if inspected_tower_index < 0 or inspected_tower_index >= towers.size():
+		return
+	var tower: Dictionary = towers[inspected_tower_index]
+	var upgrades := TowerCatalogScript.upgrades(int(tower.type))
+	var level: int = int(tower.get("upgrade_level", 0))
+	if level >= upgrades.size():
+		return
+	var upgrade: Dictionary = upgrades[level]
+	var cost: int = int(upgrade.cost)
+	if money < cost:
+		return
+	money -= cost
+	money_popup_amount = cost
+	money_popup_time = 1.0
+	tower.upgrade_level = level + 1
+	tower.cost = int(tower.get("cost", 0)) + cost
+	tower.damage += int(upgrade.get("damage", 0))
+	tower.range += float(upgrade.get("range", 0.0))
+	tower.projectile_range += float(upgrade.get("projectile_range", 0.0))
+	tower.explosion_radius = float(tower.get("explosion_radius", 68.0)) + float(upgrade.get("explosion", 0.0))
+	tower.chain_hits = int(tower.get("chain_hits", 5)) + int(upgrade.get("chain", 0))
+	tower.banana_value = int(tower.get("banana_value", 30)) + int(upgrade.get("banana_value", 0))
+	tower.banana_interval = maxf(2.0, float(tower.get("banana_interval", 8.0)) + float(upgrade.get("banana_interval", 0.0)))
+	tower.heal_amount = int(tower.get("heal_amount", 8)) + int(upgrade.get("heal", 0))
+	tower.spike_count = int(tower.get("spike_count", 4)) + int(upgrade.get("spike_count", 0))
+	if upgrade.has("reload_mult"):
+		tower.reload *= float(upgrade.reload_mult)
+	upgrade_effects.append({"position": tower.position, "time": 0.9, "color": TOWER_COLORS[int(tower.type)], "title": str(upgrade.name)})
+	game_sound.play_debug_effect("wave_jump")
+
+func update_upgrade_effects(delta: float) -> void:
+	for index in range(upgrade_effects.size() - 1, -1, -1):
+		upgrade_effects[index].time -= delta
+		if upgrade_effects[index].time <= 0.0:
+			upgrade_effects.remove_at(index)
+
 func change_inspected_target_mode(direction: int) -> void:
 	if inspected_tower_index < 0 or inspected_tower_index >= towers.size():
 		return
@@ -1237,13 +1328,15 @@ func rpc_set_game_speed(new_speed: float) -> void:
 	rival_speed_vote = 0
 
 func set_requested_debug_mode() -> void:
-	var target_vote := 2 if debug_mode else 1
-	local_debug_vote = target_vote
 	if multiplayer.is_server():
-		rpc_show_rival_debug_vote.rpc(target_vote)
-		try_apply_debug_vote()
+		rpc_set_debug_mode.rpc(not debug_mode)
 	else:
-		rpc_request_debug_vote.rpc_id(1, target_vote)
+		rpc_request_debug_toggle.rpc_id(1, not debug_mode)
+
+@rpc("any_peer", "reliable")
+func rpc_request_debug_toggle(enabled: bool) -> void:
+	if multiplayer.is_server():
+		rpc_set_debug_mode.rpc(enabled)
 
 @rpc("any_peer", "reliable")
 func rpc_request_debug_vote(target_vote: int) -> void:
@@ -1263,6 +1356,8 @@ func try_apply_debug_vote() -> void:
 func rpc_set_debug_mode(enabled: bool) -> void:
 	debug_mode = enabled
 	debug_paused = false
+	if not enabled:
+		debug_invulnerable = false
 	local_debug_vote = 0
 	rival_debug_vote = 0
 	local_pause_vote = 0
@@ -1273,13 +1368,15 @@ func rpc_set_debug_mode(enabled: bool) -> void:
 func request_debug_pause_toggle() -> void:
 	if not debug_mode:
 		return
-	var target_vote := 2 if debug_paused else 1
-	local_pause_vote = target_vote
 	if multiplayer.is_server():
-		rpc_show_rival_pause_vote.rpc(target_vote)
-		try_apply_pause_vote()
+		rpc_set_debug_pause.rpc(not debug_paused)
 	else:
-		rpc_request_pause_vote.rpc_id(1, target_vote)
+		rpc_request_debug_pause_toggle.rpc_id(1, not debug_paused)
+
+@rpc("any_peer", "reliable")
+func rpc_request_debug_pause_toggle(paused: bool) -> void:
+	if multiplayer.is_server() and debug_mode:
+		rpc_set_debug_pause.rpc(paused)
 
 @rpc("any_peer", "reliable")
 func rpc_request_pause_vote(target_vote: int) -> void:
@@ -1303,14 +1400,85 @@ func rpc_set_debug_pause(paused: bool) -> void:
 	if game_sound:
 		game_sound.play_debug_effect("pause" if paused else "resume")
 
-func request_debug_wave(target_wave: int) -> void:
-	if not debug_mode or target_wave < 1 or target_wave > 99 or outgoing_debug_wave >= 0 or pending_debug_wave >= 0:
+func grant_debug_money() -> void:
+	if not debug_mode:
 		return
-	outgoing_debug_wave = target_wave
+	money += 1000
+	if game_sound:
+		game_sound.play_money_effect()
+
+func toggle_debug_invulnerability() -> void:
+	if not debug_mode:
+		return
+	debug_invulnerable = not debug_invulnerable
+	if game_sound:
+		game_sound.play_debug_effect("resume" if debug_invulnerable else "pause")
+
+func debug_balloon_options() -> Array[Dictionary]:
+	return [
+		{"label":"Nivel 1", "kind":1, "tier":1, "speed":"Normal", "life":"1", "layers":"1", "leak":1, "waves":"1+"},
+		{"label":"Nivel 2", "kind":2, "tier":2, "speed":"Normal+", "life":"2", "layers":"2", "leak":2, "waves":"3+"},
+		{"label":"Nivel 3", "kind":3, "tier":3, "speed":"Media", "life":"3", "layers":"3", "leak":3, "waves":"4+"},
+		{"label":"Nivel 4", "kind":4, "tier":4, "speed":"Media+", "life":"4", "layers":"4", "leak":4, "waves":"7+"},
+		{"label":"Nivel 5", "kind":5, "tier":5, "speed":"Rápida", "life":"5", "layers":"5", "leak":5, "waves":"10+"},
+		{"label":"Nivel 6", "kind":6, "tier":6, "speed":"Rápida", "life":"6", "layers":"6", "leak":6, "waves":"15+"},
+		{"label":"Nivel 7", "kind":7, "tier":7, "speed":"Muy rápida", "life":"7", "layers":"7", "leak":7, "waves":"18+"},
+		{"label":"Nivel 8", "kind":8, "tier":8, "speed":"Media", "life":"8", "layers":"8", "leak":8, "waves":"21+"},
+		{"label":"Nivel 9", "kind":9, "tier":9, "speed":"Rápida", "life":"9", "layers":"9", "leak":9, "waves":"24+"},
+		{"label":"Cerámica", "kind":95, "tier":9, "speed":"Nivel 9", "life":"13 + 9", "layers":"9,5", "leak":9, "waves":"28+"},
+		{"label":"Blindado", "kind":81, "tier":8, "speed":"Nivel 2", "life":"32 físico", "layers":"Blindaje", "leak":18, "waves":"23+"},
+		{"label":"Escudo mágico", "kind":82, "tier":8, "speed":"Nivel 2", "life":"32 mágico", "layers":"Escudo", "leak":18, "waves":"25+"},
+		{"label":"MOAB", "kind":100, "tier":10, "speed":"Lenta", "life":"100", "layers":"Dirigible", "leak":140, "waves":"34+"}
+	]
+
+func debug_balloon_button_rect(index: int) -> Rect2:
+	return Rect2(1445 + (index % 3) * 125, 365 + (index / 3) * 78, 115, 68)
+
+func debug_balloon_button_at(position: Vector2) -> int:
+	if not debug_mode or debug_tab != 1:
+		return -1
+	for index in range(debug_balloon_options().size()):
+		if debug_balloon_button_rect(index).has_point(position):
+			return index
+	return -1
+
+func debug_path_distance(position: Vector2) -> float:
+	var total := 0.0
+	var best_distance := INF
+	var best_path_distance := 0.0
+	for index in range(path.size() - 1):
+		var point := Geometry2D.get_closest_point_to_segment(position, path[index], path[index + 1])
+		var distance := point.distance_to(position)
+		if distance < best_distance:
+			best_distance = distance
+			best_path_distance = total + path[index].distance_to(point)
+		total += path[index].distance_to(path[index + 1])
+	return best_path_distance if best_distance <= 30.0 else -1.0
+
+func place_debug_balloon(path_distance: float) -> void:
+	if debug_spawn_kind < 0 or path_distance < 0.0:
+		return
+	var regenerative := debug_spawn_regenerative and debug_spawn_kind != 100
+	match debug_spawn_kind:
+		95: spawn_ceramic_nine_balloon(path_distance, debug_spawn_camouflaged, regenerative)
+		81: spawn_armored_balloon(path_distance, debug_spawn_camouflaged, regenerative)
+		82: spawn_magic_shield_balloon(path_distance, debug_spawn_camouflaged, regenerative)
+		100: spawn_moab(path_distance, debug_spawn_camouflaged, false)
+		_: spawn_balloon_of_tier(debug_spawn_kind, path_distance, debug_spawn_camouflaged, regenerative)
+	debug_spawn_kind = -1
+
+func request_debug_wave(target_wave: int) -> void:
+	if not debug_mode or target_wave < 1 or target_wave > 99:
+		return
 	if multiplayer.is_server():
-		rpc_show_debug_wave_request.rpc(target_wave)
+		rpc_apply_debug_wave.rpc(target_wave)
 	else:
-		rpc_request_debug_wave.rpc_id(1, target_wave)
+		rpc_request_direct_debug_wave.rpc_id(1, target_wave)
+
+@rpc("any_peer", "reliable")
+func rpc_request_direct_debug_wave(target_wave: int) -> void:
+	if multiplayer.is_server() and debug_mode:
+		rpc_apply_debug_wave.rpc(clampi(target_wave, 1, 99))
 
 @rpc("any_peer", "reliable")
 func rpc_request_debug_wave(target_wave: int) -> void:
@@ -1405,7 +1573,7 @@ func rpc_place_rival_tower(position: Vector2, tower_kind: int) -> void:
 		"reload": config.reload,
 		"projectile_speed": config.projectile_speed,
 		"projectile_range": config.projectile_range, "thermal_vision": config.thermal_vision,
-		"cooldown": 0.0, "banana_timer": 0.0, "target_mode": 0, "color": TOWER_COLORS[tower_kind], "type": tower_kind
+		"cooldown": 0.0, "banana_timer": 0.0, "target_mode": 0, "upgrade_level": 0, "banana_value": 30, "banana_interval": 8.0, "heal_amount": 8, "chain_hits": 5, "explosion_radius": 68.0, "spike_count": 4, "color": TOWER_COLORS[tower_kind], "type": tower_kind
 	})
 
 func too_close_to_tower(position: Vector2) -> bool:
@@ -1730,7 +1898,9 @@ func draw_online_duel() -> void:
 	draw_remote_lightning()
 	draw_sword_swipes(Vector2(960, 270), Vector2(0.75, 0.75), rival_sword_swipes)
 	draw_spikes_at(Vector2(960, 270), rival_spikes)
+	draw_upgrade_effects(Vector2(0, 270))
 	draw_placement_preview()
+	draw_debug_balloon_preview()
 	draw_inspected_tower_highlight()
 	draw_rect(Rect2(956, 0, 8, HEIGHT), Color("f4d66d"))
 	draw_style_box(make_box(Color(0.05, 0.18, 0.25, 0.92), 12), Rect2(30, 34, 690, 120))
@@ -1800,29 +1970,73 @@ func draw_online_duel() -> void:
 		draw_centered("Haz clic para volver a empezar", Vector2(960, 570), 28, Color.WHITE)
 
 func draw_debug_controls(font: Font) -> void:
-	var panel := Rect2(1430, 300, 390, 250)
+	var panel := Rect2(1430, 300, 390, 450)
 	draw_style_box(make_box(Color(0.10, 0.08, 0.20, 0.96), 12), panel)
-	draw_string(font, panel.position + Vector2(22, 31), "MODO DEBUG", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color("d8b9ff"))
+	draw_style_box(make_box(Color("7859a0") if debug_tab == 0 else Color("2b2940"), 8), Rect2(1440, 305, 180, 35))
+	draw_style_box(make_box(Color("7859a0") if debug_tab == 1 else Color("2b2940"), 8), Rect2(1630, 305, 180, 35))
+	draw_centered("CONTROL", Vector2(1530, 329), 15, Color.WHITE)
+	draw_centered("GENERAR GLOBOS", Vector2(1720, 329), 14, Color.WHITE)
+	if debug_tab == 1:
+		draw_debug_balloon_generator(font)
+		return
 	var pause_color := Color("c27a46") if not debug_paused else Color("4b9b78")
-	draw_style_box(make_box(pause_color, 9), Rect2(1460, 315, 180, 50))
-	draw_centered("PAUSAR" if not debug_paused else "REANUDAR", Vector2(1550, 347), 17, Color.WHITE)
-	if rival_pause_vote > 0:
-		draw_string(font, Vector2(1655, 348), "Rival: %s" % ("pausar" if rival_pause_vote == 1 else "reanudar"), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("f4d66d"))
-	elif local_pause_vote > 0:
-		draw_string(font, Vector2(1655, 348), "Esperando rival", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("bdd1de"))
-	draw_string(font, Vector2(1460, 378), "Avanzar a oleada", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("d9eef4"))
-	draw_style_box(make_box(Color("31546c") if editing_field == "debug_wave" else Color("294a60"), 8), Rect2(1460, 385, 130, 50))
-	draw_string(font, Vector2(1476, 417), debug_wave_input + ("|" if editing_field == "debug_wave" else ""), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color.WHITE)
-	draw_style_box(make_box(Color("4b7d9e") if debug_wave_input.to_int() >= 1 else Color("355b70"), 8), Rect2(1605, 385, 160, 50))
-	draw_centered("AVANZAR", Vector2(1685, 417), 16, Color.WHITE)
-	if outgoing_debug_wave >= 0:
-		draw_string(font, Vector2(1460, 460), "Esperando respuesta: oleada %d" % outgoing_debug_wave, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("f4d66d"))
-	if pending_debug_wave >= 0:
-		draw_string(font, Vector2(1460, 460), "¿Avanzar a la oleada %d?" % pending_debug_wave, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
-		draw_style_box(make_box(Color("4b9b78"), 8), Rect2(1460, 475, 140, 50))
-		draw_style_box(make_box(Color("a3424d"), 8), Rect2(1615, 475, 150, 50))
-		draw_centered("ACEPTAR", Vector2(1530, 507), 15, Color.WHITE)
-		draw_centered("RECHAZAR", Vector2(1690, 507), 15, Color.WHITE)
+	draw_style_box(make_box(pause_color, 9), Rect2(1460, 355, 180, 50))
+	draw_centered("PAUSAR" if not debug_paused else "REANUDAR", Vector2(1550, 387), 17, Color.WHITE)
+	draw_string(font, Vector2(1460, 418), "Avanzar a oleada", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("d9eef4"))
+	draw_style_box(make_box(Color("31546c") if editing_field == "debug_wave" else Color("294a60"), 8), Rect2(1460, 425, 130, 50))
+	draw_string(font, Vector2(1476, 457), debug_wave_input + ("|" if editing_field == "debug_wave" else ""), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color.WHITE)
+	draw_style_box(make_box(Color("4b7d9e") if debug_wave_input.to_int() >= 1 else Color("355b70"), 8), Rect2(1605, 425, 160, 50))
+	draw_centered("AVANZAR", Vector2(1685, 457), 16, Color.WHITE)
+	draw_style_box(make_box(Color("b68243"), 8), Rect2(1460, 495, 145, 50))
+	draw_style_box(make_box(Color("4b9b78") if debug_invulnerable else Color("6a3545"), 8), Rect2(1620, 495, 145, 50))
+	draw_centered("+$1000", Vector2(1532, 527), 17, Color.WHITE)
+	draw_centered("INMUNE" if debug_invulnerable else "INMUNIDAD", Vector2(1692, 527), 15, Color.WHITE)
+
+func draw_debug_balloon_generator(font: Font) -> void:
+	var options := debug_balloon_options()
+	for index in range(options.size()):
+		var option: Dictionary = options[index]
+		var rect := debug_balloon_button_rect(index)
+		var selected := int(option.kind) == debug_spawn_kind
+		var hovered := index == debug_hover_balloon
+		draw_style_box(make_box(Color("73516f") if selected else Color("4a6175") if hovered else Color("293f51"), 8), rect)
+		draw_circle(rect.position + Vector2(25, 28), 17, Color("3f83ba") if int(option.kind) == 100 else TOWER_COLORS[clampi(int(option.tier), 0, TOWER_COLORS.size() - 1)])
+		draw_string(font, rect.position + Vector2(48, 25), str(option.label), HORIZONTAL_ALIGNMENT_LEFT, 62, 13, Color.WHITE)
+		draw_string(font, rect.position + Vector2(48, 47), "♥%s · %s" % [option.life, option.speed], HORIZONTAL_ALIGNMENT_LEFT, 62, 11, Color("d9eef4"))
+	draw_style_box(make_box(Color("4b9b78") if debug_spawn_camouflaged else Color("33445a"), 8), Rect2(1460, 700, 155, 42))
+	draw_style_box(make_box(Color("b45c76") if debug_spawn_regenerative else Color("33445a"), 8), Rect2(1630, 700, 155, 42))
+	draw_centered("✓ CAMUFLAJE" if debug_spawn_camouflaged else "CAMUFLAJE", Vector2(1537, 727), 13, Color.WHITE)
+	draw_centered("✓ REGENERATIVO" if debug_spawn_regenerative else "REGENERATIVO", Vector2(1707, 727), 13, Color.WHITE)
+	if debug_hover_balloon >= 0 and debug_hover_balloon < options.size():
+		var info: Dictionary = options[debug_hover_balloon]
+		var tooltip := Rect2(970, 570, 440, 170)
+		draw_style_box(make_box(Color(0.05, 0.12, 0.18, 0.96), 10), tooltip)
+		draw_string(font, tooltip.position + Vector2(18, 29), str(info.label), HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color.WHITE)
+		draw_string(font, tooltip.position + Vector2(18, 58), "Velocidad: %s · Daño frontera: %d" % [info.speed, info.leak], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("d9eef4"))
+		draw_string(font, tooltip.position + Vector2(18, 84), "Vida: %s · Capas: %s" % [info.life, info.layers], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("d9eef4"))
+		draw_string(font, tooltip.position + Vector2(18, 110), "Aparece desde oleada %s" % info.waves, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("f4d66d"))
+		draw_string(font, tooltip.position + Vector2(18, 141), "Camuflado: %s · Regenerativo: %s" % ["sí" if debug_spawn_camouflaged else "no", "sí" if debug_spawn_regenerative and int(info.kind) != 100 else "no"], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("bdd1de"))
+
+func draw_debug_balloon_preview() -> void:
+	if not debug_mode or debug_spawn_kind < 0 or not Rect2(0, 270, 960, 540).has_point(cursor_position):
+		return
+	var position := (cursor_position - Vector2(0, 270)) / Vector2(0.75, 0.75)
+	var valid := debug_path_distance(position) >= 0.0
+	var preview: Dictionary = {"tier": clampi(debug_spawn_kind, 1, 9), "camouflaged": debug_spawn_camouflaged, "regenerative": debug_spawn_regenerative}
+	if debug_spawn_kind == 95:
+		preview = {"tier":9, "ceramic_shell":true, "shell_stage":0, "camouflaged":debug_spawn_camouflaged, "regenerative":debug_spawn_regenerative}
+	elif debug_spawn_kind == 81:
+		preview = {"tier":8, "armored":true, "armor_hp":32, "camouflaged":debug_spawn_camouflaged, "regenerative":debug_spawn_regenerative}
+	elif debug_spawn_kind == 82:
+		preview = {"tier":8, "magic_shield":true, "shield_hp":32, "camouflaged":debug_spawn_camouflaged, "regenerative":debug_spawn_regenerative}
+	elif debug_spawn_kind == 100:
+		preview = {"tier":100, "moab":true, "moab_hp":100, "moab_stage":0, "camouflaged":debug_spawn_camouflaged}
+	draw_set_transform(Vector2(0, 270), 0.0, Vector2(0.75, 0.75))
+	draw_circle(position, 48.0, Color(0.35, 0.9, 0.55, 0.20) if valid else Color(1.0, 0.18, 0.18, 0.32))
+	draw_balloon(position, preview)
+	if not valid:
+		draw_circle(position, 43.0, Color(1.0, 0.12, 0.12, 0.34))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 func draw_duel_arena(origin: Vector2, arena_towers: Array, arena_balloons: Array, arena_projectiles: Array) -> void:
 	draw_set_transform(origin, 0.0, Vector2(0.75, 0.75))
@@ -1838,6 +2052,23 @@ func draw_duel_arena(origin: Vector2, arena_towers: Array, arena_balloons: Array
 		draw_spikes(spikes)
 	if arena_towers == towers:
 		draw_sword_swipes(origin, Vector2(0.75, 0.75))
+
+func draw_upgrade_effects(origin: Vector2) -> void:
+	if upgrade_effects.is_empty():
+		return
+	var font := ThemeDB.fallback_font
+	draw_set_transform(origin, 0.0, Vector2(0.75, 0.75))
+	for effect in upgrade_effects:
+		var alpha: float = clampf(float(effect.time) / 0.9, 0.0, 1.0)
+		var radius := 42.0 + (1.0 - alpha) * 55.0
+		var ring_color: Color = effect.color
+		ring_color.a = alpha
+		draw_arc(effect.position, radius, 0.0, TAU, 28, ring_color, 4.0)
+		for star in range(6):
+			var angle := star * TAU / 6.0 + (1.0 - alpha) * 2.0
+			draw_circle(effect.position + Vector2(cos(angle), sin(angle)) * radius, 4.0, Color(1.0, 0.92, 0.45, alpha))
+		draw_centered(str(effect.title), effect.position + Vector2(0, -radius - 12), 18, Color(1.0, 1.0, 1.0, alpha))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 func draw_dart(position: Vector2, color: Color, direction: Vector2, kind := 0) -> void:
 	if kind == 1:
@@ -2392,12 +2623,17 @@ func draw_inspected_tower_menu() -> void:
 		draw_string(font, Vector2(1418, 867), "›", HORIZONTAL_ALIGNMENT_LEFT, -1, 27, Color.WHITE)
 		draw_centered(target_modes[target_mode], Vector2(1321, 866), 17, Color("f4d66d"))
 	draw_string(font, Vector2(995, 896), "Daño total: %d   ·   Globos explotados: %d" % [int(tower.get("damage_dealt", 0)), int(tower.get("bloons_popped", 0))], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("d9eef4"))
-	draw_style_box(make_box(Color("35475a"), 9), Rect2(995, 905, 140, 55))
-	draw_style_box(make_box(Color("35475a"), 9), Rect2(1148, 905, 140, 55))
-	draw_string(font, Vector2(1008, 930), "MEJORA 1", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("d9eef4"))
-	draw_string(font, Vector2(1002, 950), "Proximamente", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("9ebfcf"))
-	draw_string(font, Vector2(1161, 930), "MEJORA 2", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("d9eef4"))
-	draw_string(font, Vector2(1155, 950), "Proximamente", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("9ebfcf"))
+	var upgrades := TowerCatalogScript.upgrades(kind)
+	var upgrade_level: int = int(tower.get("upgrade_level", 0))
+	if upgrade_level < upgrades.size():
+		var next_upgrade: Dictionary = upgrades[upgrade_level]
+		var can_buy_upgrade: bool = money >= int(next_upgrade.cost)
+		draw_style_box(make_box(Color("4b7d9e") if can_buy_upgrade else Color("6f353d"), 9), Rect2(995, 905, 450, 55))
+		draw_string(font, Vector2(1008, 929), "MEJORA %d/3 · %s · $%d" % [upgrade_level + 1, next_upgrade.name, next_upgrade.cost], HORIZONTAL_ALIGNMENT_LEFT, 425, 16, Color.WHITE)
+		draw_string(font, Vector2(1008, 950), str(next_upgrade.description), HORIZONTAL_ALIGNMENT_LEFT, 425, 13, Color("d9eef4"))
+	else:
+		draw_style_box(make_box(Color("4b9b78"), 9), Rect2(995, 905, 450, 55))
+		draw_centered("MEJORAS COMPLETAS · NIVEL 3", Vector2(1220, 939), 17, Color.WHITE)
 	var refund: int = int(round(float(tower.get("cost", 0)) * 0.6))
 	draw_style_box(make_box(Color("843d45"), 9), Rect2(1300, 965, 145, 58))
 	draw_string(font, Vector2(1320, 1001), "VENDER $%d" % refund, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
