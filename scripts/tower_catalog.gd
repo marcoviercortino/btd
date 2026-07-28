@@ -19,7 +19,7 @@ static func config(kind: int) -> Dictionary:
 	]
 	return configs[kind]
 
-static func upgrades(kind: int) -> Array[Dictionary]:
+static func upgrades(kind: int) -> Array:
 	var paths: Array = [
 		[{"name":"Punta de acero", "description":"Dardos más pesados: +1 daño.", "cost":180, "damage":1}, {"name":"Cadencia táctica", "description":"Dispara más rápido y gana alcance.", "cost":300, "reload_mult":0.72, "range":15}, {"name":"Ráfaga solar", "description":"Una descarga luminosa: +2 daño.", "cost":600, "damage":2}],
 		[{"name":"Filo gemelo", "description":"Bumerán reforzado: +1 daño.", "cost":240, "damage":1}, {"name":"Órbita amplia", "description":"Trayectoria más larga y +25 alcance.", "cost":420, "range":25, "projectile_range":70}, {"name":"Retorno ciclón", "description":"Regresa con fuerza: +2 daño y más cadencia.", "cost":760, "damage":2, "reload_mult":0.80}],

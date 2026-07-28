@@ -47,6 +47,6 @@ game_sound.gd::GDScript::2658819998818871204::1785253622::0::1::::GameSound<>Nod
 main.gd::GDScript::3190628593635555509::1785255386::0::1::::<>Node2D<><>0<>0<><>::
 map_catalog.gd::GDScript::7564190244940966043::1785245337::0::1::::MapCatalog<>RefCounted<><>0<>0<><>::
 remote_prediction.gd::GDScript::6028864848802364766::1785242848::0::1::::RemotePrediction<>RefCounted<><>0<>0<><>::
-tower_catalog.gd::GDScript::8982837337347372000::1785253960::0::1::::TowerCatalog<>RefCounted<><>0<>0<><>::
+tower_catalog.gd::GDScript::8982837337347372000::1785255613::0::1::::TowerCatalog<>RefCounted<><>0<>0<><>::
 ::res://script_templates/::1785187356
 ::res://text_editor_themes/::1785187356
