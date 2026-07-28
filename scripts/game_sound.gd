@@ -146,3 +146,43 @@ func play_money_effect() -> void:
 		var sample := (sin(TAU * note * time) + sin(TAU * note * 2.0 * time) * 0.22) * envelope * 0.26
 		playback.push_frame(Vector2(sample, sample))
 	get_tree().create_timer(duration + 0.08).timeout.connect(player.queue_free)
+
+func play_upgrade_effect() -> void:
+	# Bright ascending arpeggio for a tower upgrade purchase.
+	var player := AudioStreamPlayer.new()
+	var stream := AudioStreamGenerator.new()
+	stream.mix_rate = 22050.0
+	stream.buffer_length = 0.42
+	player.stream = stream
+	player.volume_db = -4.5
+	add_child(player)
+	player.play()
+	var playback := player.get_stream_playback()
+	var duration := 0.27
+	var notes := [440.0, 554.37, 659.25]
+	for frame in range(int(duration * stream.mix_rate)):
+		var time := float(frame) / stream.mix_rate
+		var segment := mini(2, int(time / 0.09))
+		var local_time := fposmod(time, 0.09)
+		var envelope := exp(-local_time * 21.0)
+		var sample := (sin(TAU * notes[segment] * time) + sin(TAU * notes[segment] * 2.0 * time) * 0.16) * envelope * 0.28
+		playback.push_frame(Vector2(sample, sample))
+	get_tree().create_timer(duration + 0.08).timeout.connect(player.queue_free)
+
+func play_error_effect() -> void:
+	var player := AudioStreamPlayer.new()
+	var stream := AudioStreamGenerator.new()
+	stream.mix_rate = 22050.0
+	stream.buffer_length = 0.22
+	player.stream = stream
+	player.volume_db = -7.0
+	add_child(player)
+	player.play()
+	var playback := player.get_stream_playback()
+	var duration := 0.13
+	for frame in range(int(duration * stream.mix_rate)):
+		var time := float(frame) / stream.mix_rate
+		var envelope := exp(-time * 18.0)
+		var sample := (sin(TAU * 135.0 * time) + sin(TAU * 178.0 * time) * 0.35) * envelope * 0.32
+		playback.push_frame(Vector2(sample, sample))
+	get_tree().create_timer(duration + 0.06).timeout.connect(player.queue_free)

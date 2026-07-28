@@ -97,6 +97,7 @@ var surrender_prompt := false
 var active_duel_tab := 0
 var balloon_scroll_row := 0
 var inspected_tower_index := -1
+var hover_upgrade_branch := -1
 var beneficios := 200
 var rival_beneficios := 200
 var beneficios_timer := 0.0
@@ -876,6 +877,11 @@ func _input(event: InputEvent) -> void:
 		if online_mode:
 			hover_tower = tower_button_at(cursor_position)
 			debug_hover_balloon = debug_balloon_button_at(cursor_position)
+			hover_upgrade_branch = -1
+			if inspected_tower_index >= 0 and inspected_tower_index < towers.size():
+				for branch in range(3):
+					if Rect2(995 + branch * 150, 905, 145, 55).has_point(cursor_position):
+						hover_upgrade_branch = branch
 		queue_redraw()
 	if event is InputEventMouseButton and event.pressed and online_mode and active_duel_tab == 1:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
@@ -1028,6 +1034,9 @@ func _input(event: InputEvent) -> void:
 				return
 			var button_kind := tower_button_at(mouse)
 			if button_kind >= 0:
+				if money < TOWER_COSTS[button_kind]:
+					game_sound.play_error_effect()
+					return
 				placement_tower = button_kind
 				selected_tower = button_kind
 				return
@@ -1045,6 +1054,7 @@ func _input(event: InputEvent) -> void:
 						place_tower(duel_position)
 					else:
 						placement_tower = -1
+						game_sound.play_error_effect()
 					return
 				if collect_banana_at(duel_position):
 					return
@@ -1091,6 +1101,7 @@ func place_tower(position: Vector2) -> bool:
 
 func place_tower_local(position: Vector2, tower_kind: int) -> void:
 	if not can_place_tower(position, tower_kind):
+		game_sound.play_error_effect()
 		return
 	money -= TOWER_COSTS[tower_kind]
 	game_sound.play_effect("place")
@@ -1252,6 +1263,7 @@ func upgrade_inspected_tower(branch: int) -> void:
 		return
 	var cost: int = int(upgrade.get("cost", 0))
 	if money < cost:
+		game_sound.play_error_effect()
 		return
 	money -= cost
 	money_popup_amount = cost
@@ -1281,7 +1293,7 @@ func upgrade_inspected_tower(branch: int) -> void:
 	if bool(upgrade.get("final", false)):
 		ultimate_tower_types[int(tower.type)] = true
 	upgrade_effects.append({"position": tower.position, "time": 0.9, "color": TOWER_COLORS[int(tower.type)], "title": str(upgrade.name)})
-	game_sound.play_debug_effect("wave_jump")
+	game_sound.play_upgrade_effect()
 
 func update_upgrade_effects(delta: float) -> void:
 	for index in range(upgrade_effects.size() - 1, -1, -1):
@@ -1301,6 +1313,7 @@ func send_balloon_to_rival(option_index: int) -> void:
 		return
 	var option: Dictionary = options[option_index]
 	if wave < option.unlock or money < option.cost:
+		game_sound.play_error_effect()
 		return
 	money -= option.cost
 	money_popup_amount = option.cost
@@ -2681,7 +2694,7 @@ func draw_inspected_tower_menu() -> void:
 	draw_texture_rect(tower_texture_for(kind), Rect2(995, 790, 88, 88), false)
 	draw_string(font, panel.position + Vector2(125, 110), "Visión térmica: %s" % ("SÍ" if tower.get("thermal_vision", false) else "NO"), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("f4d66d") if tower.get("thermal_vision", false) else Color("9ebfcf"))
 	draw_string(font, Vector2(1100, 810), TOWER_NAMES[kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 25, Color.WHITE)
-	draw_string(font, Vector2(1100, 842), "Daño %d · Alcance %d" % [tower.damage, tower.range], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("bdd1de"))
+	draw_string(font, Vector2(1100, 842), "Daño %d · Alcance %d · Ataque %.2f s" % [tower.damage, tower.range, float(tower.get("reload", 0.0))], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("bdd1de"))
 	if kind != 5 and kind != 6 and kind != 8:
 		var target_modes := ["PRIMERO", "ÚLTIMO", "MÁS FUERTE", "MÁS DÉBIL"]
 		var target_mode: int = int(tower.get("target_mode", 0))
@@ -2700,10 +2713,22 @@ func draw_inspected_tower_menu() -> void:
 		var rect := Rect2(995 + branch * 150, 905, 145, 55)
 		var level: int = int(levels[branch])
 		var role := "PRINCIPAL" if branch == primary_branch else "SECUNDARIA" if branch == secondary_branch else "ELEGIR"
-		var color := Color("4b7d9e") if branch == primary_branch else Color("76543a") if branch == secondary_branch else Color("35475a")
+		var max_level: int = 5 if branch == primary_branch else 2 if branch == secondary_branch else 3
+		var next_cost := 0
+		if level < mini(max_level, branches[branch].levels.size()):
+			next_cost = int(branches[branch].levels[level].get("cost", 0))
+		var color := Color("6f353d") if next_cost > money else Color("4b7d9e") if branch == primary_branch else Color("76543a") if branch == secondary_branch else Color("35475a")
 		draw_style_box(make_box(color, 8), rect)
 		draw_centered(str(branches[branch].name), rect.get_center() + Vector2(0, -8), 15, Color.WHITE)
-		draw_centered("%s %d/%d" % [role, level, 5 if branch == primary_branch else 2 if branch == secondary_branch else 0], rect.get_center() + Vector2(0, 14), 12, Color("d9eef4"))
+		draw_centered("%s %d/%d" % [role, level, max_level], rect.get_center() + Vector2(0, 14), 12, Color("d9eef4"))
+	if hover_upgrade_branch >= 0 and hover_upgrade_branch < branches.size():
+		var hover_level: int = int(levels[hover_upgrade_branch])
+		if hover_level < branches[hover_upgrade_branch].levels.size():
+			var preview: Dictionary = branches[hover_upgrade_branch].levels[hover_level]
+			var tip := Rect2(970, 680, 500, 72)
+			draw_style_box(make_box(Color(0.05, 0.12, 0.18, 0.97), 10), tip)
+			draw_string(font, tip.position + Vector2(16, 25), "%s · $%d" % [str(preview.get("name", "Mejora")), int(preview.get("cost", 0))], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color("ffd76a"))
+			draw_string(font, tip.position + Vector2(16, 52), str(preview.get("description", "Mejora de torre")), HORIZONTAL_ALIGNMENT_LEFT, 470, 15, Color.WHITE)
 	var refund: int = int(round(float(tower.get("cost", 0)) * 0.6))
 	draw_style_box(make_box(Color("843d45"), 9), Rect2(1300, 965, 145, 58))
 	draw_string(font, Vector2(1320, 1001), "VENDER $%d" % refund, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
