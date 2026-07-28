@@ -51,6 +51,12 @@ var rival_projectiles: Array[Dictionary] = []
 var rival_defeated := false
 var net_sync_timer := 0.0
 var auto_wave_timer := 2.5
+var placement_tower := -1
+var hover_tower := -1
+var cursor_position := Vector2.ZERO
+var local_wave_finished := false
+var rival_wave_finished := false
+var online_wave_start_timer := -1.0
 
 func _ready() -> void:
 	rng.randomize()
@@ -67,6 +73,7 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 	update_wave(delta)
+	update_online_wave_sync(delta)
 	update_balloons(delta)
 	if online_mode:
 		update_rival_prediction(delta)
@@ -82,10 +89,6 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 func update_wave(delta: float) -> void:
-	if online_mode and not wave_active and not game_over and not won:
-		auto_wave_timer -= delta
-		if auto_wave_timer <= 0.0:
-			start_wave_local()
 	if wave_active:
 		spawn_timer -= delta
 		if spawn_left > 0 and spawn_timer <= 0.0:
@@ -96,7 +99,7 @@ func update_wave(delta: float) -> void:
 			wave_active = false
 			money += 80 + wave * 12
 			if online_mode:
-				auto_wave_timer = 3.0
+				report_local_wave_finished()
 			if wave >= 12 and not online_mode:
 				won = true
 
@@ -116,6 +119,42 @@ func start_wave_local() -> void:
 	spawn_timer = 0.15
 	wave_banner = 1.8
 
+func update_online_wave_sync(delta: float) -> void:
+	if not online_mode or not multiplayer.is_server() or online_wave_start_timer < 0.0:
+		return
+	online_wave_start_timer -= delta
+	if online_wave_start_timer <= 0.0:
+		online_wave_start_timer = -1.0
+		rpc_begin_online_wave.rpc(wave + 1)
+
+func report_local_wave_finished() -> void:
+	if local_wave_finished:
+		return
+	local_wave_finished = true
+	if multiplayer.is_server():
+		try_schedule_online_wave()
+	else:
+		rpc_report_wave_finished.rpc_id(1, wave)
+
+func try_schedule_online_wave() -> void:
+	if local_wave_finished and rival_wave_finished and online_wave_start_timer < 0.0:
+		online_wave_start_timer = 2.5
+
+@rpc("any_peer", "reliable")
+func rpc_report_wave_finished(finished_wave: int) -> void:
+	if multiplayer.is_server() and finished_wave == wave:
+		rival_wave_finished = true
+		try_schedule_online_wave()
+
+@rpc("any_peer", "call_local", "reliable")
+func rpc_begin_online_wave(next_wave: int) -> void:
+	if game_over or won:
+		return
+	wave = next_wave - 1
+	local_wave_finished = false
+	rival_wave_finished = false
+	start_wave_local()
+
 func spawn_balloon() -> void:
 	var tier := 1
 	if wave >= 5 and rng.randf() < 0.22 + wave * 0.012:
@@ -123,7 +162,8 @@ func spawn_balloon() -> void:
 	if wave >= 9 and rng.randf() < 0.16:
 		tier = 3
 	var hp := tier
-	balloons.append({"distance": 0.0, "speed": 58.0 + wave * 4.0 + tier * 8.0, "hp": hp, "max_hp": hp, "tier": tier})
+	var base_speed := 58.0 + wave * 4.0
+	balloons.append({"distance": 0.0, "base_speed": base_speed, "speed": base_speed + tier * 7.0, "hp": hp, "max_hp": hp, "tier": tier})
 
 func update_balloons(delta: float) -> void:
 	for i in range(balloons.size() - 1, -1, -1):
@@ -185,11 +225,17 @@ func update_projectiles(delta: float) -> void:
 		if p.position.distance_to(target_pos) < 15.0:
 			balloons[p.target].hp -= p.damage
 			if balloons[p.target].hp <= 0:
-				money += 12 * balloons[p.target].tier
-				balloons.remove_at(p.target)
-				for other in projectiles:
-					if other.target > p.target:
-						other.target -= 1
+				if balloons[p.target].tier > 1:
+					balloons[p.target].tier -= 1
+					balloons[p.target].max_hp = balloons[p.target].tier
+					balloons[p.target].hp = balloons[p.target].tier
+					balloons[p.target].speed = balloons[p.target].base_speed + balloons[p.target].tier * 7.0
+				else:
+					money += 12
+					balloons.remove_at(p.target)
+					for other in projectiles:
+						if other.target > p.target:
+							other.target -= 1
 			projectiles.remove_at(i)
 
 func point_on_path(distance: float) -> Vector2:
@@ -201,6 +247,11 @@ func point_on_path(distance: float) -> Vector2:
 	return path[path.size() - 1]
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		cursor_position = event.position
+		if online_mode:
+			hover_tower = tower_button_at(cursor_position)
+		queue_redraw()
 	if not mode_selected:
 		if online_lobby:
 			handle_lobby_input(event)
@@ -228,9 +279,14 @@ func _input(event: InputEvent) -> void:
 			get_tree().reload_current_scene()
 			return
 		if online_mode:
+			var button_kind := tower_button_at(mouse)
+			if button_kind >= 0:
+				placement_tower = button_kind
+				selected_tower = button_kind
+				return
 			if Rect2(0, 270, 960, 540).has_point(mouse):
 				var duel_position := (mouse - Vector2(0, 270)) / Vector2(0.75, 0.75)
-				if PLAY_RECT.has_point(duel_position):
+				if placement_tower >= 0 and can_place_tower(duel_position, placement_tower):
 					place_tower(duel_position)
 			return
 		if Rect2(18, 400, 210, 72).has_point(mouse):
@@ -245,17 +301,20 @@ func _input(event: InputEvent) -> void:
 		if PLAY_RECT.has_point(mouse):
 			place_tower(mouse)
 
-func place_tower(position: Vector2) -> void:
+func place_tower(position: Vector2) -> bool:
 	if online_mode:
 		var before_count := towers.size()
 		place_tower_local(position, selected_tower)
 		if towers.size() > before_count:
 			rpc_place_rival_tower.rpc(position, selected_tower)
-		return
+			placement_tower = -1
+			return true
+		return false
 	place_tower_local(position, selected_tower)
+	return true
 
 func place_tower_local(position: Vector2, tower_kind: int) -> void:
-	if money < TOWER_COSTS[tower_kind] or too_close_to_path(position) or too_close_to_tower(position):
+	if not can_place_tower(position, tower_kind):
 		return
 	money -= TOWER_COSTS[tower_kind]
 	var is_boomerang := tower_kind == 1
@@ -267,6 +326,16 @@ func place_tower_local(position: Vector2, tower_kind: int) -> void:
 	})
 	if multiplayer_mode:
 		active_player = 2 if active_player == 1 else 1
+
+func can_place_tower(position: Vector2, tower_kind: int) -> bool:
+	return PLAY_RECT.has_point(position) and money >= TOWER_COSTS[tower_kind] and not too_close_to_path(position) and not too_close_to_tower(position)
+
+func tower_button_at(position: Vector2) -> int:
+	if Rect2(30, 850, 260, 150).has_point(position):
+		return 0
+	if Rect2(310, 850, 260, 150).has_point(position):
+		return 1
+	return -1
 
 @rpc("any_peer", "unreliable")
 func rpc_update_rival(remote_lives: int, remote_money: int, remote_wave: int, remote_towers: Array, remote_balloons: Array, remote_projectiles_data: Array, remote_lost: bool) -> void:
@@ -483,6 +552,8 @@ func launch_online_match() -> void:
 	online_mode = true
 	multiplayer_mode = false
 	editing_field = ""
+	if multiplayer.is_server():
+		online_wave_start_timer = 2.5
 	queue_redraw()
 
 func draw_online_lobby() -> void:
@@ -521,6 +592,7 @@ func draw_online_duel() -> void:
 	draw_duel_arena(Vector2(0, 270), towers, balloons, projectiles)
 	draw_duel_arena(Vector2(960, 270), rival_towers, rival_balloons, rival_projectiles)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	draw_placement_preview()
 	draw_rect(Rect2(956, 0, 8, HEIGHT), Color("f4d66d"))
 	draw_style_box(make_box(Color(0.05, 0.18, 0.25, 0.92), 12), Rect2(30, 34, 690, 120))
 	draw_style_box(make_box(Color(0.30, 0.10, 0.16, 0.92), 12), Rect2(1200, 34, 690, 120))
@@ -529,9 +601,9 @@ func draw_online_duel() -> void:
 	draw_string(font, Vector2(60, 126), "VIDAS %d  ·  $ %d  ·  OLEADA %d" % [lives, money, wave], HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
 	draw_string(font, Vector2(1230, 82), "FRENTE RIVAL", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color("ffb0a8"))
 	draw_string(font, Vector2(1230, 126), "VIDAS %d  ·  $ %d  ·  OLEADA %d" % [rival_lives, rival_money, rival_wave], HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
-	draw_style_box(make_box(Color(0.05, 0.18, 0.25, 0.92), 10), Rect2(30, 885, 710, 120))
-	draw_string(font, Vector2(60, 935), "TORRE: %s  ·  [1] Dardo  [2] Bumerán" % TOWER_NAMES[selected_tower], HORIZONTAL_ALIGNMENT_LEFT, -1, 25, TOWER_COLORS[selected_tower])
-	draw_string(font, Vector2(60, 975), "Oleadas automáticas · Los dardos se ven en ambos mapas", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("d9eef4"))
+	draw_tower_button(Rect2(30, 850, 260, 150), 0)
+	draw_tower_button(Rect2(310, 850, 260, 150), 1)
+	draw_tower_tooltip()
 	if game_over or won:
 		draw_rect(Rect2(0, 0, WIDTH, HEIGHT), Color(0.03, 0.08, 0.13, 0.78))
 		draw_centered("¡GANASTE EL DUELO!" if won else "TU FRENTE CAYO", Vector2(960, 500), 56, Color("f8d36a") if won else Color("ff8d8d"))
@@ -554,3 +626,40 @@ func draw_dart(position: Vector2, color: Color, direction: Vector2) -> void:
 	draw_line(tail, tip, Color("263544"), 5.0)
 	draw_line(tail, tip, color, 2.5)
 	draw_circle(tip, 3.5, Color.WHITE)
+
+func draw_tower_button(rect: Rect2, kind: int) -> void:
+	var active := placement_tower == kind
+	var hovered := hover_tower == kind
+	var fill := Color("31546c") if active else Color("294a60") if hovered else Color("1d4055")
+	draw_style_box(make_box(fill, 12), rect)
+	var tower_texture = DART_RANGER_TEXTURE if kind == 0 else BOOMERANG_SCOUT_TEXTURE
+	draw_texture_rect(tower_texture, Rect2(rect.position + Vector2(10, 16), Vector2(100, 100)), false)
+	var font := ThemeDB.fallback_font
+	draw_string(font, rect.position + Vector2(120, 50), TOWER_NAMES[kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 25, Color.WHITE)
+	draw_string(font, rect.position + Vector2(120, 88), "$ %d" % TOWER_COSTS[kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color("ffd76a"))
+	draw_string(font, rect.position + Vector2(120, 119), "Clic para colocar", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("bdd1de"))
+
+func draw_tower_tooltip() -> void:
+	if hover_tower < 0:
+		return
+	var rect := Rect2(600, 850, 340, 150)
+	draw_style_box(make_box(Color(0.07, 0.14, 0.20, 0.96), 12), rect)
+	var font := ThemeDB.fallback_font
+	var damage := 1 if hover_tower == 0 else 2
+	var attack_speed := "0.38 s" if hover_tower == 0 else "0.82 s"
+	var range_value := "135" if hover_tower == 0 else "180"
+	draw_string(font, rect.position + Vector2(20, 34), TOWER_NAMES[hover_tower], HORIZONTAL_ALIGNMENT_LEFT, -1, 24, TOWER_COLORS[hover_tower])
+	draw_string(font, rect.position + Vector2(20, 67), "Coste: $ %d   ·   Daño: %d" % [TOWER_COSTS[hover_tower], damage], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
+	draw_string(font, rect.position + Vector2(20, 96), "Velocidad de ataque: %s" % attack_speed, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
+	draw_string(font, rect.position + Vector2(20, 125), "Alcance: %s" % range_value, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color("bdd1de"))
+
+func draw_placement_preview() -> void:
+	if placement_tower < 0 or not Rect2(0, 270, 960, 540).has_point(cursor_position):
+		return
+	var preview_position := (cursor_position - Vector2(0, 270)) / Vector2(0.75, 0.75)
+	var is_valid := can_place_tower(preview_position, placement_tower)
+	var tint := Color(1.0, 1.0, 1.0, 0.55) if is_valid else Color(1.0, 0.28, 0.28, 0.62)
+	var texture = DART_RANGER_TEXTURE if placement_tower == 0 else BOOMERANG_SCOUT_TEXTURE
+	draw_set_transform(Vector2(0, 270), 0.0, Vector2(0.75, 0.75))
+	draw_texture_rect(texture, Rect2(preview_position - Vector2(34, 38), Vector2(68, 68)), false, tint)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
