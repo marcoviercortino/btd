@@ -19,6 +19,7 @@ const MYSTIC_ARCHER_TEXTURE = preload("res://assets/characters/mystic_archer.svg
 const REEF_MEDIC_TEXTURE = preload("res://assets/characters/reef_medic.svg")
 const TIDE_CAPTAIN_TEXTURE = preload("res://assets/characters/tide_captain.svg")
 const BANANA_FARMER_TEXTURE = preload("res://assets/characters/banana_farmer.svg")
+const BOOMERANG_PROJECTILE_TEXTURE = preload("res://assets/projectiles/boomerang.svg")
 
 var path := PackedVector2Array([
 	Vector2(250, 170), Vector2(470, 170), Vector2(530, 310),
@@ -219,28 +220,37 @@ func rpc_begin_online_wave(next_wave: int) -> void:
 	start_wave_local()
 
 func spawn_balloon() -> void:
+	if wave >= 16 and rng.randf() < minf(0.06 + (wave - 16) * 0.014, 0.24):
+		spawn_moab()
+		return
 	var tier := 1
-	if wave >= 5 and rng.randf() < 0.22 + wave * 0.012:
+	if wave >= 3 and rng.randf() < minf(0.20 + wave * 0.025, 0.55):
 		tier = 2
-	if wave >= 9 and rng.randf() < 0.16:
+	if wave >= 4 and rng.randf() < minf(0.08 + (wave - 4) * 0.022, 0.42):
 		tier = 3
-	if wave >= 14 and rng.randf() < 0.14:
+	if wave >= 7 and rng.randf() < minf(0.06 + (wave - 7) * 0.018, 0.31):
 		tier = 4
-	if wave >= 19 and rng.randf() < 0.10:
+	if wave >= 10 and rng.randf() < minf(0.04 + (wave - 10) * 0.014, 0.24):
 		tier = 5
 	spawn_balloon_of_tier(tier)
 
 func spawn_balloon_of_tier(tier: int, initial_distance := 0.0) -> void:
 	var hp := tier
 	var base_speed := 58.0 + wave * 4.0
-	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": base_speed, "speed": base_speed + tier * 7.0, "hp": hp, "max_hp": hp, "tier": tier})
+	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": base_speed, "speed": base_speed + tier * 7.0, "hp": hp, "max_hp": hp, "tier": tier, "moab": false, "leak_damage": tier, "radius": 24.0})
+	next_balloon_id += 1
+
+func spawn_moab(initial_distance := 0.0) -> void:
+	var layers: int = 12 + max(0, wave - 20) * 2
+	var speed: float = 36.0 + wave * 1.1
+	balloons.append({"id": next_balloon_id, "distance": initial_distance, "base_speed": speed, "speed": speed, "hp": layers, "max_hp": layers, "tier": layers, "moab": true, "leak_damage": 25 + max(0, wave - 20) * 2, "radius": 43.0})
 	next_balloon_id += 1
 
 func update_balloons(delta: float) -> void:
 	for i in range(balloons.size() - 1, -1, -1):
 		balloons[i].distance += balloons[i].speed * delta
 		if balloons[i].distance >= path_total:
-			lives -= balloons[i].tier
+			lives -= int(balloons[i].get("leak_damage", balloons[i].tier))
 			balloons.remove_at(i)
 			if lives <= 0:
 				lives = 0
@@ -285,7 +295,12 @@ func update_towers(delta: float) -> void:
 		var best_distance := -1.0
 		for i in balloons.size():
 			var balloon_position := point_on_path(balloons[i].distance)
-			if tower.position.distance_to(balloon_position) <= tower.range and balloons[i].distance > best_distance:
+			var target_distance: float = tower.position.distance_to(balloon_position)
+			# A boomerang can only lock a balloon that can lie on its fixed circular route.
+			var can_mark: bool = target_distance <= float(tower.range)
+			if tower.type == 1:
+				can_mark = target_distance <= minf(tower.range, 320.0)
+			if can_mark and balloons[i].distance > best_distance:
 				target_index = i
 				best_distance = balloons[i].distance
 		if target_index >= 0:
@@ -297,11 +312,19 @@ func update_towers(delta: float) -> void:
 				var projectile := {"id": next_projectile_id, "position": tower.position, "target": target_index, "target_position": locked_target_position, "damage": tower.damage, "speed": tower.projectile_speed, "color": tower.color, "direction": shot_direction, "kind": tower.type, "remaining": tower.projectile_range, "hit_ids": []}
 				if tower.type == 1:
 					var chord: Vector2 = locked_target_position - tower.position
-					var center: Vector2 = (tower.position + locked_target_position) * 0.5 + Vector2(-chord.y, chord.x) * 0.5
+					var fixed_radius: float = 160.0
+					var half_chord: float = chord.length() * 0.5
+					var perpendicular: Vector2 = Vector2(-chord.y, chord.x).normalized()
+					var center_a: Vector2 = (tower.position + locked_target_position) * 0.5 + perpendicular * sqrt(maxf(0.0, fixed_radius * fixed_radius - half_chord * half_chord))
+					var center_b: Vector2 = (tower.position + locked_target_position) * 0.5 - perpendicular * sqrt(maxf(0.0, fixed_radius * fixed_radius - half_chord * half_chord))
+					var start_a: float = (tower.position - center_a).angle()
+					var target_a: float = (locked_target_position - center_a).angle()
+					var travel_a: float = fposmod(target_a - start_a, TAU)
+					var center: Vector2 = center_a if travel_a <= PI else center_b
 					projectile.circle_center = center
-					projectile.circle_radius = tower.position.distance_to(center)
+					projectile.circle_radius = fixed_radius
 					projectile.circle_angle = (tower.position - center).angle()
-					projectile.arc_remaining = PI * 1.45
+					projectile.arc_remaining = TAU
 				projectiles.append(projectile)
 				next_projectile_id += 1
 				game_sound.play_effect("dart", -15.0)
@@ -373,7 +396,7 @@ func update_projectiles(delta: float) -> void:
 				p.position += p.direction * p.speed * delta
 				p.remaining -= p.speed * delta
 			for j in range(balloons.size() - 1, -1, -1):
-				if balloons[j].id not in p.hit_ids and p.position.distance_to(point_on_path(balloons[j].distance)) < 24.0:
+				if balloons[j].id not in p.hit_ids and p.position.distance_to(point_on_path(balloons[j].distance)) < float(balloons[j].get("radius", 24.0)):
 					p.hit_ids.append(balloons[j].id)
 					damage_balloon(j, p.damage)
 			if (p.kind == 1 and p.arc_remaining <= 0.0) or (p.kind == 4 and p.remaining <= 0.0):
@@ -410,7 +433,8 @@ func damage_balloon(index: int, damage: int) -> void:
 	if balloons[index].tier > 0:
 		balloons[index].max_hp = balloons[index].tier
 		balloons[index].hp = balloons[index].tier
-		balloons[index].speed = balloons[index].base_speed + balloons[index].tier * 7.0
+		if not balloons[index].get("moab", false):
+			balloons[index].speed = balloons[index].base_speed + balloons[index].tier * 7.0
 		return
 	balloons.remove_at(index)
 	for other in projectiles:
@@ -610,7 +634,8 @@ func send_options() -> Array[Dictionary]:
 		{"tier": 3, "count": 1, "cost": 110, "benefit": 3, "unlock": 6, "label": "Pesado"},
 		{"tier": 3, "count": 3, "cost": 90, "benefit": 4, "unlock": 9, "label": "Trío veloz"},
 		{"tier": 5, "count": 2, "cost": 140, "benefit": 6, "unlock": 14, "label": "Dúo élite"},
-		{"tier": 4, "count": 4, "cost": 210, "benefit": 8, "unlock": 18, "label": "Escuadrón"}
+		{"tier": 4, "count": 4, "cost": 210, "benefit": 8, "unlock": 18, "label": "Escuadrón"},
+		{"tier": 12, "count": 1, "cost": 360, "benefit": 14, "unlock": 22, "label": "MOAB", "moab": true}
 	]
 
 func balloon_send_rect(option_index: int) -> Rect2:
@@ -628,12 +653,15 @@ func send_balloon_to_rival(option_index: int) -> void:
 	money_popup_time = 1.0
 	beneficios += option.benefit
 	game_sound.play_effect("send")
-	rpc_receive_sent_balloon.rpc(option.tier, option.count)
+	rpc_receive_sent_balloon.rpc(option.tier, option.count, option.get("moab", false))
 
 @rpc("any_peer", "reliable")
-func rpc_receive_sent_balloon(tier: int, count: int) -> void:
+func rpc_receive_sent_balloon(tier: int, count: int, is_moab := false) -> void:
 	for i in range(clampi(count, 1, 5)):
-		spawn_balloon_of_tier(clampi(tier, 1, 5), -float(i) * 70.0)
+		if is_moab:
+			spawn_moab(-float(i) * 110.0)
+		else:
+			spawn_balloon_of_tier(clampi(tier, 1, 5), -float(i) * 70.0)
 
 @rpc("any_peer", "unreliable")
 func rpc_update_rival(remote_lives: int, remote_money: int, remote_beneficios: int, remote_wave: int, remote_towers: Array, remote_balloons: Array, remote_projectiles_data: Array, remote_lightning: Array, remote_bananas_data: Array, remote_lost: bool) -> void:
@@ -713,7 +741,7 @@ func _draw() -> void:
 	for balloon in balloons:
 		draw_balloon(point_on_path(balloon.distance), balloon)
 	for projectile in projectiles:
-		draw_circle(projectile.position, 5, projectile.color)
+		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT), projectile.kind)
 	if wave_banner > 0.0:
 		draw_centered("OLEADA %d" % wave, Vector2(765, 75), 34, Color.WHITE)
 	if game_over or won:
@@ -753,6 +781,13 @@ func make_box(color: Color, radius: float) -> StyleBoxFlat:
 	return box
 
 func draw_balloon(position: Vector2, balloon: Dictionary) -> void:
+	if balloon.get("moab", false):
+		var integrity := float(balloon.tier) / maxf(1.0, float(balloon.get("max_hp", balloon.tier)))
+		draw_style_box(make_box(Color("172638"), 12), Rect2(position - Vector2(42, 27), Vector2(84, 54)))
+		draw_style_box(make_box(Color("3f83ba").lerp(Color("a94d56"), 1.0 - integrity), 10), Rect2(position - Vector2(37, 22), Vector2(74, 44)))
+		draw_rect(Rect2(position + Vector2(-32, -15), Vector2(64 * integrity, 6)), Color("d9f4ff"))
+		draw_string(ThemeDB.fallback_font, position + Vector2(-25, 10), "MOAB", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
+		return
 	# Index 0 is unused so a balloon's tier maps directly to its colour.
 	var colors := [Color("ef5e62"), Color("478fe4"), Color("f5d35d"), Color("a97cdd"), Color("7bd4bf"), Color("ee8f54")]
 	var tier_index := clampi(int(balloon.tier), 0, colors.size() - 1)
@@ -967,9 +1002,12 @@ func draw_duel_arena(origin: Vector2, arena_towers: Array, arena_balloons: Array
 	for balloon in arena_balloons:
 		draw_balloon(point_on_path(balloon.distance), balloon)
 	for projectile in arena_projectiles:
-		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT))
+		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT), projectile.kind)
 
-func draw_dart(position: Vector2, color: Color, direction: Vector2) -> void:
+func draw_dart(position: Vector2, color: Color, direction: Vector2, kind := 0) -> void:
+	if kind == 1:
+		draw_texture_rect(BOOMERANG_PROJECTILE_TEXTURE, Rect2(position - Vector2(16, 16), Vector2(32, 32)), false)
+		return
 	var tip := position + direction * 12.0
 	var tail := position - direction * 12.0
 	draw_line(tail, tip, Color("263544"), 5.0)
@@ -1341,7 +1379,7 @@ func draw_balloon_send_buttons(font: Font) -> void:
 		var unlocked: bool = wave >= option.unlock
 		var fill := Color("6f353d") if unlocked and money < option.cost else Color("1d4055") if unlocked else Color("4c515a")
 		draw_style_box(make_box(fill, 10), rect)
-		var icon_color: Color = colors[clampi(option.tier, 1, colors.size() - 1)]
+		var icon_color: Color = Color("3f83ba") if option.get("moab", false) else colors[clampi(option.tier, 1, colors.size() - 1)]
 		if not unlocked: icon_color = icon_color.darkened(0.65)
 		draw_circle(rect.position + Vector2(38, 45), 24, icon_color)
 		draw_string(font, rect.position + Vector2(72, 31), option.label, HORIZONTAL_ALIGNMENT_LEFT, 130, 15, Color.WHITE if unlocked else Color("b2b6bb"))
