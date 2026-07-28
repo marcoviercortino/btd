@@ -52,10 +52,18 @@ var rival_wave := 0
 var rival_towers: Array[Dictionary] = []
 var rival_balloons: Array[Dictionary] = []
 var rival_projectiles: Array[Dictionary] = []
+var rival_lightning_effects: Array[Dictionary] = []
 var rival_defeated := false
 var net_sync_timer := 0.0
 var auto_wave_timer := 2.5
 var next_balloon_id := 1
+var loadout_select := false
+var chosen_towers: Array[int] = []
+var loadout_ready := false
+var rival_ready := false
+var money_popup_amount := 0
+var money_popup_time := 0.0
+var surrender_prompt := false
 var placement_tower := -1
 var hover_tower := -1
 var cursor_position := Vector2.ZERO
@@ -71,6 +79,11 @@ func _ready() -> void:
 	queue_redraw()
 
 func _process(delta: float) -> void:
+	if money_popup_time > 0.0:
+		money_popup_time -= delta
+	if loadout_select:
+		queue_redraw()
+		return
 	if not mode_selected:
 		queue_redraw()
 		return
@@ -89,7 +102,7 @@ func _process(delta: float) -> void:
 		net_sync_timer -= delta
 		if net_sync_timer <= 0.0:
 			net_sync_timer = 0.10
-			rpc_update_rival.rpc(lives, money, wave, towers, balloons, projectiles, game_over)
+			rpc_update_rival.rpc(lives, money, wave, towers, balloons, projectiles, lightning_effects, game_over)
 	if wave_banner > 0.0:
 		wave_banner -= delta
 	queue_redraw()
@@ -167,6 +180,10 @@ func spawn_balloon() -> void:
 		tier = 2
 	if wave >= 9 and rng.randf() < 0.16:
 		tier = 3
+	if wave >= 14 and rng.randf() < 0.14:
+		tier = 4
+	if wave >= 19 and rng.randf() < 0.10:
+		tier = 5
 	var hp := tier
 	var base_speed := 58.0 + wave * 4.0
 	balloons.append({"id": next_balloon_id, "distance": 0.0, "base_speed": base_speed, "speed": base_speed + tier * 7.0, "hp": hp, "max_hp": hp, "tier": tier})
@@ -182,7 +199,7 @@ func update_balloons(delta: float) -> void:
 				lives = 0
 				game_over = true
 				if online_mode:
-					rpc_update_rival.rpc(lives, money, wave, towers, balloons, projectiles, true)
+					rpc_update_rival.rpc(lives, money, wave, towers, balloons, projectiles, lightning_effects, true)
 					rpc_report_defeat.rpc()
 
 func update_rival_prediction(delta: float) -> void:
@@ -314,22 +331,27 @@ func _input(event: InputEvent) -> void:
 			hover_tower = tower_button_at(cursor_position)
 		queue_redraw()
 	if not mode_selected:
+		if loadout_select:
+			handle_loadout_input(event)
+			return
 		if online_lobby:
 			handle_lobby_input(event)
 			return
 		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 			var menu_position: Vector2 = event.position / 1.5
 			if Rect2(250, 330, 230, 190).has_point(menu_position):
-				mode_selected = true
-				multiplayer_mode = false
+				open_loadout_select(false)
 			elif Rect2(525, 330, 230, 190).has_point(menu_position):
-				mode_selected = true
+				open_loadout_select(false)
 				multiplayer_mode = true
 			elif Rect2(800, 330, 230, 190).has_point(menu_position):
 				online_lobby = true
 			queue_redraw()
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_ESCAPE and online_mode:
+			surrender_prompt = not surrender_prompt
+			return
 		if event.keycode == KEY_1: selected_tower = 0
 		if event.keycode == KEY_2: selected_tower = 1
 		if event.keycode == KEY_SPACE and not online_mode: start_wave()
@@ -340,6 +362,16 @@ func _input(event: InputEvent) -> void:
 			get_tree().reload_current_scene()
 			return
 		if online_mode:
+			if surrender_prompt:
+				if Rect2(820, 575, 130, 62).has_point(mouse):
+					game_over = true
+					rpc_report_defeat.rpc()
+				if Rect2(970, 575, 180, 62).has_point(mouse):
+					surrender_prompt = false
+				return
+			if Rect2(1640, 850, 230, 62).has_point(mouse):
+				surrender_prompt = true
+				return
 			var button_kind := tower_button_at(mouse)
 			if button_kind >= 0:
 				placement_tower = button_kind
@@ -378,6 +410,8 @@ func place_tower_local(position: Vector2, tower_kind: int) -> void:
 	if not can_place_tower(position, tower_kind):
 		return
 	money -= TOWER_COSTS[tower_kind]
+	money_popup_amount = TOWER_COSTS[tower_kind]
+	money_popup_time = 1.0
 	var config := tower_config(tower_kind)
 	towers.append({
 		"position": position, "range": config.range,
@@ -394,32 +428,33 @@ func can_place_tower(position: Vector2, tower_kind: int) -> bool:
 	return PLAY_RECT.has_point(position) and money >= TOWER_COSTS[tower_kind] and not too_close_to_path(position) and not too_close_to_tower(position)
 
 func tower_button_at(position: Vector2) -> int:
-	for kind in range(TOWER_NAMES.size()):
-		if tower_button_rect(kind).has_point(position):
-			return kind
+	for index in range(chosen_towers.size()):
+		if tower_button_rect(index).has_point(position):
+			return chosen_towers[index]
 	return -1
 
 func tower_config(kind: int) -> Dictionary:
 	var configs := [
-		{"range": 135.0, "damage": 1, "reload": 0.38, "projectile_speed": 600.0, "projectile_range": 260.0},
-		{"range": 180.0, "damage": 2, "reload": 0.82, "projectile_speed": 520.0, "projectile_range": 270.0},
-		{"range": 155.0, "damage": 1, "reload": 1.25, "projectile_speed": 360.0, "projectile_range": 260.0},
-		{"range": 120.0, "damage": 1, "reload": 1.35, "projectile_speed": 0.0, "projectile_range": 0.0},
-		{"range": 240.0, "damage": 1, "reload": 0.62, "projectile_speed": 940.0, "projectile_range": 520.0}
+		{"range": 135.0, "damage": 1, "reload": 0.85, "projectile_speed": 600.0, "projectile_range": 260.0},
+		{"range": 180.0, "damage": 2, "reload": 1.35, "projectile_speed": 520.0, "projectile_range": 270.0},
+		{"range": 155.0, "damage": 1, "reload": 2.0, "projectile_speed": 360.0, "projectile_range": 260.0},
+		{"range": 120.0, "damage": 1, "reload": 2.15, "projectile_speed": 0.0, "projectile_range": 0.0},
+		{"range": 240.0, "damage": 1, "reload": 1.1, "projectile_speed": 940.0, "projectile_range": 520.0}
 	]
 	return configs[kind]
 
 func tower_button_rect(kind: int) -> Rect2:
-	return Rect2(22 + kind * 185, 850, 170, 150)
+	return Rect2(22 + kind * 210, 850, 195, 150)
 
 @rpc("any_peer", "unreliable")
-func rpc_update_rival(remote_lives: int, remote_money: int, remote_wave: int, remote_towers: Array, remote_balloons: Array, remote_projectiles_data: Array, remote_lost: bool) -> void:
+func rpc_update_rival(remote_lives: int, remote_money: int, remote_wave: int, remote_towers: Array, remote_balloons: Array, remote_projectiles_data: Array, remote_lightning: Array, remote_lost: bool) -> void:
 	rival_lives = remote_lives
 	rival_money = remote_money
 	rival_wave = remote_wave
 	rival_towers = remote_towers
 	rival_balloons = remote_balloons
 	rival_projectiles = remote_projectiles_data
+	rival_lightning_effects = remote_lightning
 	rival_defeated = remote_lost
 	if remote_lost and not game_over:
 		won = true
@@ -455,6 +490,9 @@ func too_close_to_path(position: Vector2) -> bool:
 
 func _draw() -> void:
 	if not mode_selected:
+		if loadout_select:
+			draw_loadout_select()
+			return
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2(1.5, 1.5))
 		if online_lobby:
 			draw_online_lobby()
@@ -560,10 +598,20 @@ func draw_mode_card(rect: Rect2, accent: Color, title: String, description: Stri
 	draw_string(font, rect.position + Vector2((rect.size.x - player_width) / 2, 173), players, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, accent)
 
 func handle_lobby_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo and not editing_field.is_empty():
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		online_lobby = false
+		editing_field = ""
+		queue_redraw()
+		return
+	if event is InputEventKey and event.pressed and not editing_field.is_empty():
 		if event.keycode == KEY_BACKSPACE:
 			if editing_field == "ip": lobby_ip = lobby_ip.left(-1)
 			else: lobby_port = lobby_port.left(-1)
+		elif event.ctrl_pressed and event.keycode == KEY_V:
+			var pasted := DisplayServer.clipboard_get()
+			for character in pasted:
+				if editing_field == "ip" and (character == "." or character.is_valid_int()): lobby_ip += character
+				if editing_field == "port" and character.is_valid_int(): lobby_port += character
 		elif event.unicode > 0:
 			var typed := char(event.unicode)
 			if editing_field == "ip" and (typed == "." or typed.is_valid_int()): lobby_ip += typed
@@ -624,14 +672,11 @@ func _on_online_connection_failed() -> void:
 	lobby_status = "No se pudo conectar. Revisa IP, puerto y firewall."
 
 func launch_online_match() -> void:
-	mode_selected = true
 	online_lobby = false
 	online_mode = true
 	multiplayer_mode = false
 	editing_field = ""
-	if multiplayer.is_server():
-		online_wave_start_timer = 2.5
-	queue_redraw()
+	open_loadout_select(true)
 
 func draw_online_lobby() -> void:
 	draw_rect(Rect2(0, 0, WIDTH, HEIGHT), Color("102536"))
@@ -653,7 +698,7 @@ func draw_lobby_field(rect: Rect2, label: String, value: String, focused: bool) 
 	draw_style_box(make_box(Color("31546c") if focused else Color("294a60"), 8), rect)
 	var font := ThemeDB.fallback_font
 	draw_string(font, rect.position + Vector2(14, 20), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("9ebfcf"))
-	draw_string(font, rect.position + Vector2(14, 39), value, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
+	draw_string(font, rect.position + Vector2(14, 39), value + ("|" if focused else ""), HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
 
 func draw_duel_status() -> void:
 	var font := ThemeDB.fallback_font
@@ -670,6 +715,7 @@ func draw_online_duel() -> void:
 	draw_duel_arena(Vector2(960, 270), rival_towers, rival_balloons, rival_projectiles)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	draw_local_lightning()
+	draw_remote_lightning()
 	draw_placement_preview()
 	draw_rect(Rect2(956, 0, 8, HEIGHT), Color("f4d66d"))
 	draw_style_box(make_box(Color(0.05, 0.18, 0.25, 0.92), 12), Rect2(30, 34, 690, 120))
@@ -677,11 +723,25 @@ func draw_online_duel() -> void:
 	var font := ThemeDB.fallback_font
 	draw_string(font, Vector2(60, 82), "TU FRENTE", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color("8ce1f1"))
 	draw_string(font, Vector2(60, 126), "VIDAS %d  ·  $ %d  ·  OLEADA %d" % [lives, money, wave], HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
+	if money_popup_time > 0.0:
+		var popup_alpha: float = clampf(money_popup_time / 0.75, 0.0, 1.0)
+		var popup_y: float = 178.0 - (1.0 - popup_alpha) * 45.0
+		draw_string(font, Vector2(60, popup_y), "- $ %d" % money_popup_amount, HORIZONTAL_ALIGNMENT_LEFT, -1, 23, Color(1.0, 0.32, 0.32, popup_alpha))
 	draw_string(font, Vector2(1230, 82), "FRENTE RIVAL", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color("ffb0a8"))
 	draw_string(font, Vector2(1230, 126), "VIDAS %d  ·  $ %d  ·  OLEADA %d" % [rival_lives, rival_money, rival_wave], HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
 	for kind in range(TOWER_NAMES.size()):
 		draw_tower_button(tower_button_rect(kind), kind)
 	draw_tower_tooltip()
+	draw_style_box(make_box(Color("843d45"), 10), Rect2(1640, 850, 230, 62))
+	draw_string(font, Vector2(1680, 890), "RENDIRSE", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color.WHITE)
+	if surrender_prompt:
+		draw_rect(Rect2(0, 0, WIDTH, HEIGHT), Color(0.02, 0.06, 0.1, 0.7))
+		draw_style_box(make_box(Color("1d4055"), 16), Rect2(690, 400, 540, 270))
+		draw_centered("¿SEGURO QUE QUIERES RENDIRTE?", Vector2(960, 475), 28, Color.WHITE)
+		draw_style_box(make_box(Color("b94a4a"), 10), Rect2(820, 575, 130, 62))
+		draw_style_box(make_box(Color("3f93bb"), 10), Rect2(970, 575, 180, 62))
+		draw_centered("SÍ", Vector2(885, 615), 20, Color.WHITE)
+		draw_centered("SEGUIR", Vector2(1060, 615), 20, Color.WHITE)
 	if game_over or won:
 		draw_rect(Rect2(0, 0, WIDTH, HEIGHT), Color(0.03, 0.08, 0.13, 0.78))
 		draw_centered("¡GANASTE EL DUELO!" if won else "TU FRENTE CAYO", Vector2(960, 500), 56, Color("f8d36a") if won else Color("ff8d8d"))
@@ -705,9 +765,104 @@ func draw_dart(position: Vector2, color: Color, direction: Vector2) -> void:
 	draw_line(tail, tip, color, 2.5)
 	draw_circle(tip, 3.5, Color.WHITE)
 
+func open_loadout_select(is_online: bool) -> void:
+	mode_selected = false
+	loadout_select = true
+	online_mode = is_online
+	chosen_towers.clear()
+	loadout_ready = false
+	rival_ready = false
+
+func handle_loadout_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		loadout_select = false
+		online_lobby = online_mode
+		return
+	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
+		return
+	if Rect2(40, 950, 180, 62).has_point(event.position):
+		loadout_select = false
+		online_lobby = online_mode
+		return
+	for kind in range(TOWER_NAMES.size()):
+		if Rect2(120 + kind * 335, 350, 290, 250).has_point(event.position):
+			if kind in chosen_towers:
+				chosen_towers.erase(kind)
+			elif chosen_towers.size() < 4 and not loadout_ready:
+				chosen_towers.append(kind)
+			queue_redraw()
+			return
+	if Rect2(760, 760, 400, 76).has_point(event.position) and chosen_towers.size() == 4:
+		loadout_ready = true
+		if online_mode:
+			if multiplayer.is_server():
+				rpc_rival_ready_indicator.rpc()
+				try_start_online_match()
+			else:
+				rpc_loadout_ready.rpc_id(1)
+		else:
+			start_match_after_loadout()
+		queue_redraw()
+
+@rpc("any_peer", "reliable")
+func rpc_loadout_ready() -> void:
+	if multiplayer.is_server():
+		rival_ready = true
+		try_start_online_match()
+
+@rpc("any_peer", "reliable")
+func rpc_rival_ready_indicator() -> void:
+	rival_ready = true
+
+func try_start_online_match() -> void:
+	if loadout_ready and rival_ready:
+		rpc_start_online_match.rpc()
+
+@rpc("any_peer", "call_local", "reliable")
+func rpc_start_online_match() -> void:
+	start_match_after_loadout()
+
+func start_match_after_loadout() -> void:
+	loadout_select = false
+	mode_selected = true
+	local_wave_finished = false
+	rival_wave_finished = false
+	if online_mode and multiplayer.is_server():
+		online_wave_start_timer = 7.0
+	queue_redraw()
+
+func draw_loadout_select() -> void:
+	draw_rect(Rect2(0, 0, WIDTH, HEIGHT), Color("102536"))
+	draw_centered("ELIGE 4 TORRES", Vector2(960, 170), 46, Color("72d2c8"))
+	draw_centered("%d / 4 seleccionadas" % chosen_towers.size(), Vector2(960, 225), 24, Color("d9eef4"))
+	var font := ThemeDB.fallback_font
+	for kind in range(TOWER_NAMES.size()):
+		var rect := Rect2(120 + kind * 335, 350, 290, 250)
+		var selected := kind in chosen_towers
+		draw_style_box(make_box(Color("31546c") if selected else Color("1d4055"), 16), rect)
+		draw_texture_rect(tower_texture_for(kind), Rect2(rect.position + Vector2(24, 30), Vector2(125, 125)), false)
+		draw_string(font, rect.position + Vector2(160, 75), TOWER_NAMES[kind], HORIZONTAL_ALIGNMENT_LEFT, 120, 20, Color.WHITE)
+		draw_string(font, rect.position + Vector2(160, 112), "$ %d" % TOWER_COSTS[kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("ffd76a"))
+		draw_string(font, rect.position + Vector2(24, 190), "Daño %d · Recarga %.2f s" % [tower_config(kind).damage, tower_config(kind).reload], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("d9eef4"))
+		draw_string(font, rect.position + Vector2(24, 220), "Alcance %d" % tower_config(kind).range, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("bdd1de"))
+	var ready_color := Color("4bba83") if chosen_towers.size() == 4 else Color("355b70")
+	draw_style_box(make_box(ready_color, 12), Rect2(760, 760, 400, 76))
+	draw_centered("PREPARADO" if not loadout_ready else "ESPERANDO RIVAL", Vector2(960, 808), 25, Color.WHITE)
+	if online_mode:
+		draw_centered("Rival preparado" if rival_ready else "Esperando a que el rival elija sus torres", Vector2(960, 890), 19, Color("f4d66d"))
+	draw_style_box(make_box(Color("294a60"), 10), Rect2(40, 950, 180, 62))
+	draw_string(font, Vector2(84, 990), "VOLVER", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color.WHITE)
+	draw_centered("Esc: volver", Vector2(960, 990), 17, Color("bdd1de"))
+
 func draw_local_lightning() -> void:
-	draw_set_transform(Vector2(0, 270), 0.0, Vector2(0.75, 0.75))
-	for effect in lightning_effects:
+	draw_lightning_effects(Vector2(0, 270), lightning_effects)
+
+func draw_remote_lightning() -> void:
+	draw_lightning_effects(Vector2(960, 270), rival_lightning_effects)
+
+func draw_lightning_effects(origin: Vector2, effects: Array) -> void:
+	draw_set_transform(origin, 0.0, Vector2(0.75, 0.75))
+	for effect in effects:
 		var points: Array = effect.points
 		for i in range(points.size() - 1):
 			draw_line(points[i], points[i + 1], Color("d8f5ff"), 5.0)
@@ -749,6 +904,7 @@ func draw_placement_preview() -> void:
 	var tint := Color(1.0, 1.0, 1.0, 0.55) if is_valid else Color(1.0, 0.28, 0.28, 0.62)
 	var texture = tower_texture_for(placement_tower)
 	draw_set_transform(Vector2(0, 270), 0.0, Vector2(0.75, 0.75))
+	draw_circle(preview_position, tower_config(placement_tower).range, Color(0.35, 0.75, 1.0, 0.13) if is_valid else Color(1.0, 0.25, 0.25, 0.15))
 	draw_texture_rect(texture, Rect2(preview_position - Vector2(34, 38), Vector2(68, 68)), false, tint)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 

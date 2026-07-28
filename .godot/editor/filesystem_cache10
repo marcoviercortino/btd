@@ -1,10 +1,10 @@
 78098b89c88a74ebe8c20117b8754620
-::res://::1785188456
+::res://::1785233206
 Main.tscn::PackedScene::-1::1785186970::0::1::::<><><>0<>0<><>::res://scripts/main.gd
 README.md::TextFile::-1::1785200980::0::1::::<><><>0<>0<><>::
 ::res://assets/::1785187225
 coral_bend_map.svg::CompressedTexture2D::608779049058291623::1785187177::1785187225::1::::<><><>0<>0<>e715ac35cbf59c66ad36353fd26a657a<>res://.godot/imported/coral_bend_map.svg-9657c90f35d9fc1a303e346133cca690.ctex::
-::res://assets/characters/::1785200964
+::res://assets/characters/::1785201005
 bombardier.png::CompressedTexture2D::4231679078167601598::1785200752::1785201004::1::::<><><>0<>0<>b2a66c2690b16e1dd0a45181d81d4669<>res://.godot/imported/bombardier.png-a50d513503b222a5efd5fd0e59ca7d7f.ctex::
 bombardier.svg::CompressedTexture2D::7247132365161593677::1785200835::1785201004::1::::<><><>0<>0<>386c23c69c490cbc62112cf08bd82e86<>res://.godot/imported/bombardier.svg-b44c44a8e464dc7aadf096845f660f24.ctex::
 bombardier_key.png::CompressedTexture2D::5727159722869952459::1785200751::1785201004::1::::<><><>0<>0<>379386a9612d0cbc096aa163580236d1<>res://.godot/imported/bombardier_key.png-4a06387871d24b8b36717aa37055c7af.ctex::
@@ -21,6 +21,6 @@ mystic_archer_key.png::CompressedTexture2D::5196034590404978716::1785200751::178
 ::res://export_templates/::1785187356
 ::res://feature_profiles/::1785187356
 ::res://scripts/::1785187084
-main.gd::GDScript::3190628593635555509::1785200955::0::1::::<>Node2D<><>0<>0<><>::
+main.gd::GDScript::3190628593635555509::1785235049::0::1::::<>Node2D<><>0<>0<><>::
 ::res://script_templates/::1785187356
 ::res://text_editor_themes/::1785187356
