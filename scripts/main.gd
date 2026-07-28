@@ -75,7 +75,7 @@ func _process(delta: float) -> void:
 	if online_mode:
 		net_sync_timer -= delta
 		if net_sync_timer <= 0.0:
-			net_sync_timer = 0.25
+			net_sync_timer = 0.10
 			rpc_update_rival.rpc(lives, money, wave, towers, balloons, projectiles, game_over)
 	if wave_banner > 0.0:
 		wave_banner -= delta
@@ -97,7 +97,7 @@ func update_wave(delta: float) -> void:
 			money += 80 + wave * 12
 			if online_mode:
 				auto_wave_timer = 3.0
-			if wave >= 12:
+			if wave >= 12 and not online_mode:
 				won = true
 
 func start_wave() -> void:
@@ -136,13 +136,21 @@ func update_balloons(delta: float) -> void:
 				game_over = true
 				if online_mode:
 					rpc_update_rival.rpc(lives, money, wave, towers, balloons, projectiles, true)
+					rpc_report_defeat.rpc()
 
 func update_rival_prediction(delta: float) -> void:
-	# The opponent sends snapshots; advancing them locally makes their view smooth between packets.
+	# The opponent sends snapshots; advance balloons and homing darts locally between packets.
 	for i in range(rival_balloons.size() - 1, -1, -1):
 		rival_balloons[i].distance += rival_balloons[i].speed * delta
 		if rival_balloons[i].distance >= path_total:
 			rival_balloons.remove_at(i)
+	for dart in rival_projectiles:
+		var target_position: Vector2 = dart.target_position
+		var previous_position: Vector2 = dart.position
+		dart.position = dart.position.move_toward(target_position, dart.speed * delta)
+		var movement: Vector2 = dart.position - previous_position
+		if movement.length_squared() > 0.01:
+			dart.direction = movement.normalized()
 
 func update_towers(delta: float) -> void:
 	for tower in towers:
@@ -157,7 +165,9 @@ func update_towers(delta: float) -> void:
 				target_index = i
 				best_distance = balloons[i].distance
 		if target_index >= 0:
-			projectiles.append({"position": tower.position, "target": target_index, "damage": tower.damage, "speed": 600.0, "color": tower.color})
+			var locked_target_position := point_on_path(balloons[target_index].distance)
+			var shot_direction: Vector2 = (locked_target_position - tower.position).normalized()
+			projectiles.append({"position": tower.position, "target": target_index, "target_position": locked_target_position, "damage": tower.damage, "speed": 600.0, "color": tower.color, "direction": shot_direction})
 			tower.cooldown = tower.reload
 
 func update_projectiles(delta: float) -> void:
@@ -166,8 +176,12 @@ func update_projectiles(delta: float) -> void:
 		if p.target < 0 or p.target >= balloons.size():
 			projectiles.remove_at(i)
 			continue
-		var target_pos := point_on_path(balloons[p.target].distance)
+		var target_pos: Vector2 = p.target_position
+		var previous_position: Vector2 = p.position
 		p.position = p.position.move_toward(target_pos, p.speed * delta)
+		var movement: Vector2 = p.position - previous_position
+		if movement.length_squared() > 0.01:
+			p.direction = movement.normalized()
 		if p.position.distance_to(target_pos) < 15.0:
 			balloons[p.target].hp -= p.damage
 			if balloons[p.target].hp <= 0:
@@ -254,7 +268,7 @@ func place_tower_local(position: Vector2, tower_kind: int) -> void:
 	if multiplayer_mode:
 		active_player = 2 if active_player == 1 else 1
 
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "unreliable")
 func rpc_update_rival(remote_lives: int, remote_money: int, remote_wave: int, remote_towers: Array, remote_balloons: Array, remote_projectiles_data: Array, remote_lost: bool) -> void:
 	rival_lives = remote_lives
 	rival_money = remote_money
@@ -264,6 +278,11 @@ func rpc_update_rival(remote_lives: int, remote_money: int, remote_wave: int, re
 	rival_projectiles = remote_projectiles_data
 	rival_defeated = remote_lost
 	if remote_lost and not game_over:
+		won = true
+
+@rpc("any_peer", "reliable")
+func rpc_report_defeat() -> void:
+	if not game_over:
 		won = true
 
 @rpc("any_peer", "reliable")
@@ -527,9 +546,11 @@ func draw_duel_arena(origin: Vector2, arena_towers: Array, arena_balloons: Array
 	for balloon in arena_balloons:
 		draw_balloon(point_on_path(balloon.distance), balloon)
 	for projectile in arena_projectiles:
-		draw_dart(projectile.position, projectile.color)
+		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT))
 
-func draw_dart(position: Vector2, color: Color) -> void:
-	draw_line(position - Vector2(9, -5), position + Vector2(9, 5), Color("263544"), 5.0)
-	draw_line(position - Vector2(9, -5), position + Vector2(9, 5), color, 2.5)
-	draw_circle(position + Vector2(10, 6), 3.5, Color.WHITE)
+func draw_dart(position: Vector2, color: Color, direction: Vector2) -> void:
+	var tip := position + direction * 12.0
+	var tail := position - direction * 12.0
+	draw_line(tail, tip, Color("263544"), 5.0)
+	draw_line(tail, tip, color, 2.5)
+	draw_circle(tip, 3.5, Color.WHITE)
