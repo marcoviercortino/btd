@@ -42,6 +42,7 @@ var path_total := 1.0
 var balloons: Array[Dictionary] = []
 var towers: Array[Dictionary] = []
 var projectiles: Array[Dictionary] = []
+var pending_projectile_spawns: Array[Dictionary] = []
 var lightning_effects: Array[Dictionary] = []
 var sword_swipes: Array[Dictionary] = []
 var spikes: Array[Dictionary] = []
@@ -257,6 +258,7 @@ func _process(delta: float) -> void:
 	if online_mode:
 		update_rival_prediction(gameplay_delta)
 	update_towers(gameplay_delta)
+	update_pending_projectiles(gameplay_delta)
 	update_projectiles(gameplay_delta)
 	update_lightning_effects(gameplay_delta)
 	update_sword_swipes(gameplay_delta)
@@ -282,10 +284,8 @@ func update_wave(delta: float) -> void:
 			wave_active = false
 			if online_mode:
 				report_local_wave_finished()
-			elif not multiplayer_mode and wave < 12:
+			elif not multiplayer_mode:
 				auto_wave_timer = 2.5
-			if wave >= 12 and not online_mode:
-				won = true
 
 func update_solo_auto_wave(delta: float) -> void:
 	if online_mode or multiplayer_mode or wave_active or game_over or won:
@@ -555,7 +555,7 @@ func update_rival_prediction(delta: float) -> void:
 			dart.circle_angle += angular_step
 			dart.arc_remaining -= angular_step
 			dart.position = dart.circle_center + Vector2(cos(dart.circle_angle), sin(dart.circle_angle)) * dart.circle_radius
-		elif dart.kind == 4:
+		elif dart.kind == 4 or dart.get("free_flying", false) or int(dart.get("pierce", 0)) > 0:
 			# The mystic arrow follows the firing vector captured at the tower,
 			# rather than chasing the target's later position.
 			dart.position += dart.direction * dart.speed * delta
@@ -615,7 +615,8 @@ func update_towers(delta: float) -> void:
 				var source_damage: int = int(tower.damage) + (2 if tower.type == 0 and tower.get("mecha", false) else 0)
 				var persistent_dart: bool = bool(tower.get("persistent_darts", false))
 				var projectile_remaining: float = float(tower.projectile_speed) * 10.0 if persistent_dart else float(tower.projectile_range)
-				var projectile := {"id": next_projectile_id, "owner": tower_index, "position": source_origin, "target": target_index, "target_position": locked_target_position, "damage": source_damage, "damage_type": tower.damage_type, "speed": tower.projectile_speed, "color": tower.color, "direction": shot_direction, "kind": tower.type, "remaining": projectile_remaining, "hit_ids": [], "pierce": dart_pierce, "scale": float(tower.get("dart_scale", 1.0)), "free_flying": persistent_dart, "remove_on_hit": persistent_dart, "fire": bool(tower.get("fire", false)), "split": int(tower.get("split", 0)), "child_split": int(tower.get("child_split", 0)), "homing": bool(tower.get("homing", false)), "kingdom": bool(tower.get("kingdom", false)), "division_depth": 0}
+				var dart_on_fire: bool = bool(tower.get("fire", false))
+				var projectile := {"id": next_projectile_id, "owner": tower_index, "position": source_origin, "target": target_index, "target_position": locked_target_position, "damage": source_damage, "damage_type": tower.damage_type, "speed": tower.projectile_speed, "color": Color("ff7a24") if dart_on_fire else tower.color, "direction": shot_direction, "kind": tower.type, "remaining": projectile_remaining, "hit_ids": [], "pierce": dart_pierce, "scale": float(tower.get("dart_scale", 1.0)), "free_flying": persistent_dart, "remove_on_hit": persistent_dart, "fire": dart_on_fire, "split": int(tower.get("split", 0)), "child_split": int(tower.get("child_split", 0)), "homing": bool(tower.get("homing", false)), "kingdom": bool(tower.get("kingdom", false)), "division_depth": 0}
 				if tower.type == 1:
 					var chord: Vector2 = locked_target_position - tower.position
 					# El radio base de 80 corresponde al alcance base del bumerÃ¡n (180).
@@ -640,7 +641,10 @@ func update_towers(delta: float) -> void:
 					var fired_projectile: Dictionary = projectile.duplicate()
 					fired_projectile.id = next_projectile_id
 					fired_projectile.direction = shot_direction.rotated(spread)
-					projectiles.append(fired_projectile)
+					if shot == 0:
+						projectiles.append(fired_projectile)
+					else:
+						pending_projectile_spawns.append({"time": 0.1 * float(shot), "projectile": fired_projectile})
 					next_projectile_id += 1
 				if tower.type == 0 and source_count > 1:
 					fire_extra_dart_sources(tower, tower_index, source_count, dart_pierce)
@@ -706,7 +710,12 @@ func fire_extra_dart_sources(tower: Dictionary, tower_index: int, source_count: 
 		for shot in range(int(tower.get("burst", 1))):
 			var spread := (float(shot) - float(int(tower.get("burst", 1)) - 1) * 0.5) * 0.055
 			var persistent_dart: bool = bool(tower.get("persistent_darts", false))
-			projectiles.append({"id":next_projectile_id, "owner":tower_index, "position":origin, "target":target_index, "target_position":target_position, "damage":int(tower.damage) + (2 if tower.get("mecha", false) else 0), "damage_type":tower.damage_type, "speed":tower.projectile_speed, "color":tower.color, "direction":direction.rotated(spread), "kind":0, "remaining":float(tower.projectile_speed) * 10.0 if persistent_dart else tower.projectile_range, "hit_ids":[], "pierce":dart_pierce, "scale":float(tower.get("dart_scale", 1.0)), "free_flying":persistent_dart, "remove_on_hit":persistent_dart, "fire":bool(tower.get("fire", false)), "split":int(tower.get("split", 0)), "child_split":int(tower.get("child_split", 0)), "homing":bool(tower.get("homing", false)), "kingdom":bool(tower.get("kingdom", false)), "division_depth":0})
+			var extra_on_fire: bool = bool(tower.get("fire", false))
+			var extra_projectile := {"id":next_projectile_id, "owner":tower_index, "position":origin, "target":target_index, "target_position":target_position, "damage":int(tower.damage) + (2 if tower.get("mecha", false) else 0), "damage_type":tower.damage_type, "speed":tower.projectile_speed, "color":Color("ff7a24") if extra_on_fire else tower.color, "direction":direction.rotated(spread), "kind":0, "remaining":float(tower.projectile_speed) * 10.0 if persistent_dart else tower.projectile_range, "hit_ids":[], "pierce":dart_pierce, "scale":float(tower.get("dart_scale", 1.0)), "free_flying":persistent_dart, "remove_on_hit":persistent_dart, "fire":extra_on_fire, "split":int(tower.get("split", 0)), "child_split":int(tower.get("child_split", 0)), "homing":bool(tower.get("homing", false)), "kingdom":bool(tower.get("kingdom", false)), "division_depth":0}
+			if shot == 0:
+				projectiles.append(extra_projectile)
+			else:
+				pending_projectile_spawns.append({"time": 0.1 * float(shot), "projectile": extra_projectile})
 			next_projectile_id += 1
 	if source_count >= 5 and tower.get("mecha", false):
 		var missile_target := choose_tower_target_for_source(tower, 4, 600.0)
@@ -834,8 +843,8 @@ func update_projectiles(delta: float) -> void:
 		if float(p.get("temporary_pierce_time", 0.0)) > 0.0:
 			p.temporary_pierce_time = maxf(0.0, float(p.temporary_pierce_time) - delta)
 			if float(p.temporary_pierce_time) <= 0.0:
-				p.pierce = 0
-				p.remove_on_hit = bool(p.get("remove_after_pierce", true))
+				p.pierce = int(p.get("pierce_after_temporary", 0))
+				p.remove_on_hit = int(p.pierce) <= 0
 		if p.kind == 4 or p.kind == 1 or int(p.get("pierce", 0)) > 0 or p.get("free_flying", false):
 			if p.kind == 1:
 				var angular_step: float = p.speed / p.circle_radius * delta
@@ -853,6 +862,10 @@ func update_projectiles(delta: float) -> void:
 				p.remaining -= p.speed * delta
 			for j in range(balloons.size() - 1, -1, -1):
 				if balloons[j].id not in p.hit_ids and p.position.distance_to(point_on_path(balloons[j].distance)) < float(balloons[j].get("radius", 24.0)):
+					# Durante la breve perforación tras dividirse el dardo solo atraviesa:
+					# no consume impacto ni aplica daño hasta terminar ese intervalo.
+					if float(p.get("temporary_pierce_time", 0.0)) > 0.0:
+						continue
 					p.hit_ids.append(balloons[j].id)
 					if p.get("fire", false):
 						balloons[j].burn_time = 2.0
@@ -910,6 +923,13 @@ func update_projectiles(delta: float) -> void:
 					spawn_dart_divisions(p, target_pos)
 			projectiles.remove_at(i)
 
+func update_pending_projectiles(delta: float) -> void:
+	for index in range(pending_projectile_spawns.size() - 1, -1, -1):
+		pending_projectile_spawns[index].time -= delta
+		if float(pending_projectile_spawns[index].time) <= 0.0:
+			projectiles.append(pending_projectile_spawns[index].projectile)
+			pending_projectile_spawns.remove_at(index)
+
 func closest_balloon_to(position: Vector2) -> int:
 	var closest := -1
 	var closest_distance := INF
@@ -932,12 +952,15 @@ func spawn_dart_divisions(parent: Dictionary, origin: Vector2) -> void:
 		projectile.position = origin
 		projectile.target = -1
 		projectile.free_flying = true
-		projectile.temporary_pierce_time = 0.2
+		projectile.temporary_pierce_time = 0.4
+		projectile.pierce_after_temporary = int(parent.get("pierce", 0)) + (1 if kingdom else 0)
 		projectile.pierce = 999
 		projectile.remove_on_hit = false
 		projectile.remove_after_pierce = true
 		projectile.direction = Vector2(parent.get("direction", Vector2.RIGHT)).rotated(angle)
-		projectile.remaining = float(parent.get("remaining", 260.0)) * 0.72
+		# Los dardos nacidos de una división tienen tres segundos para encontrar
+		# un objetivo, independientemente del alcance que tuviera el dardo padre.
+		projectile.remaining = float(projectile.get("speed", 600.0)) * 3.0
 		projectile.hit_ids = []
 		projectile.split = int(parent.get("child_split", 0)) if not kingdom else 18 if int(parent.get("division_depth", 0)) == 0 else 0
 		projectile.child_split = 0
@@ -2254,7 +2277,7 @@ func _draw() -> void:
 	for balloon in balloons:
 		draw_balloon(point_on_path(balloon.distance), balloon)
 	for projectile in projectiles:
-		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT), projectile.kind, float(projectile.get("scale", 1.0)))
+		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT), projectile.kind, float(projectile.get("scale", 1.0)), bool(projectile.get("fire", false)))
 	draw_solo_bananas()
 	draw_sword_swipes(Vector2.ZERO, Vector2.ONE)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
@@ -2277,7 +2300,7 @@ func draw_hud() -> void:
 	var font := ThemeDB.fallback_font
 	draw_string(font, Vector2(18, 46), "BALLOON\nFRONTIER", HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color("72d2c8"))
 	draw_string(font, Vector2(18, 126), "$ %d" % money, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color("ffd76a"))
-	draw_string(font, Vector2(18, 164), "♥ %d     Oleada %d / 12" % [lives, wave], HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color.WHITE)
+	draw_string(font, Vector2(18, 164), "♥ %d     Oleada %d" % [lives, wave], HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color.WHITE)
 	var mode_text := "CO-OP LOCAL\nTurno: Jugador %d" % active_player if multiplayer_mode else "1 VS 1 EN LINEA\nDuelo en curso" if online_mode else "INDIVIDUAL\nDefiende la salida"
 	draw_string(font, Vector2(18, 210), "%s\n1 / 2: elige torre\nEspacio: iniciar oleada" % mode_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("bdd1de"))
 	draw_speed_selector(Vector2(18, 250), 210.0, 52.0)
@@ -2913,7 +2936,7 @@ func draw_solo_arena() -> void:
 	for balloon in balloons:
 		draw_balloon(point_on_path(balloon.distance), balloon)
 	for projectile in projectiles:
-		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT), projectile.kind, float(projectile.get("scale", 1.0)))
+		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT), projectile.kind, float(projectile.get("scale", 1.0)), bool(projectile.get("fire", false)))
 	draw_spikes(spikes)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
@@ -3159,7 +3182,7 @@ func draw_duel_arena(origin: Vector2, arena_towers: Array, arena_balloons: Array
 	for balloon in arena_balloons:
 		draw_balloon(point_on_path(balloon.distance), balloon)
 	for projectile in arena_projectiles:
-		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT), projectile.kind, float(projectile.get("scale", 1.0)))
+		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT), projectile.kind, float(projectile.get("scale", 1.0)), bool(projectile.get("fire", false)))
 	if arena_towers == towers:
 		draw_spikes(spikes)
 	if arena_towers == towers:
@@ -3233,18 +3256,28 @@ func draw_tower_upgrade_decorations(tower: Dictionary) -> void:
 			var angle: float = float(mark) * TAU / float(maxi(1, rhythm)) - PI * 0.5
 			draw_circle(position + Vector2(cos(angle), sin(angle)) * (36.0 + rhythm * 2.0), 2.4, Color(0.55, 1.0, 0.72, 0.72))
 
-func draw_dart(position: Vector2, color: Color, direction: Vector2, kind := 0, scale := 1.0) -> void:
+func draw_dart(position: Vector2, color: Color, direction: Vector2, kind := 0, scale := 1.0, on_fire := false) -> void:
 	if kind == 1:
 		draw_texture_rect(BOOMERANG_PROJECTILE_TEXTURE, Rect2(position - Vector2(16, 16), Vector2(32, 32)), false)
 		return
 	if kind == 2:
 		draw_texture_rect(BOMB_PROJECTILE_TEXTURE, Rect2(position - Vector2(18, 18), Vector2(36, 36)), false)
 		return
-	var tip := position + direction * 12.0 * scale
-	var tail := position - direction * 12.0 * scale
-	draw_line(tail, tip, Color("263544"), 5.0 * scale)
-	draw_line(tail, tip, color, 2.5 * scale)
-	draw_circle(tip, 3.5 * scale, Color.WHITE)
+	var forward := direction.normalized()
+	var side := Vector2(-forward.y, forward.x)
+	var tip := position + forward * 15.0 * scale
+	var shaft_end := position - forward * 13.0 * scale
+	# Punta triangular, eje metálico y dos plumas: una silueta clara de dardo.
+	draw_colored_polygon(PackedVector2Array([tip, position + side * 5.0 * scale, position - side * 5.0 * scale]), Color("e8f4fb"))
+	draw_polyline(PackedVector2Array([tip, position + side * 5.0 * scale, position - side * 5.0 * scale, tip]), Color("253847"), 1.4 * scale)
+	draw_line(shaft_end, position, Color("253847"), 4.5 * scale)
+	draw_line(shaft_end, position, color, 2.4 * scale)
+	draw_colored_polygon(PackedVector2Array([shaft_end, shaft_end - forward * 7.0 * scale + side * 5.0 * scale, shaft_end - forward * 2.0 * scale]), color.lightened(0.24))
+	draw_colored_polygon(PackedVector2Array([shaft_end, shaft_end - forward * 7.0 * scale - side * 5.0 * scale, shaft_end - forward * 2.0 * scale]), color.darkened(0.18))
+	if on_fire:
+		draw_circle(shaft_end - forward * 7.0 * scale, 6.0 * scale, Color(1.0, 0.22, 0.04, 0.68))
+		draw_circle(shaft_end - forward * 11.0 * scale + side * 2.0 * scale, 4.0 * scale, Color(1.0, 0.63, 0.08, 0.72))
+		draw_circle(shaft_end - forward * 4.0 * scale, 2.5 * scale, Color("fff0a0"))
 
 func draw_sword_swipes(origin: Vector2, scale: Vector2, swipe_list := sword_swipes) -> void:
 	if swipe_list.is_empty():

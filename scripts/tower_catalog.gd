@@ -62,7 +62,7 @@ static func upgrade_branches(kind: int) -> Array:
 			{"name":"Entrenamiento", "levels":[
 				{"name":"Entrenamiento de campo", "description":"Más alcance y visión térmica.", "cost":350, "range":25, "thermal_vision":true},
 				{"name":"Rapidez", "description":"+30% velocidad de ataque.", "cost":300, "attack_rate_mult":1.3},
-				{"name":"Auto-dardo", "description":"Ráfagas de 5; +30% ataque y +100% velocidad de proyectil.", "cost":2750, "attack_rate_mult":1.3, "burst":5, "projectile_speed_mult":2.0},
+				{"name":"Auto-dardo", "description":"Ráfagas de 5 cada 0,1 s; +30% ataque y +30% velocidad de proyectil.", "cost":2750, "attack_rate_mult":1.3, "burst":5, "projectile_speed_mult":1.3},
 				{"name":"Doble cañón", "description":"Dos fuentes y dos objetivos. Los dardos duran hasta 10 s o el impacto.", "cost":3200, "sources":2, "persistent_darts":true},
 				{"name":"Mecha-dardo", "description":"Cinco fuentes: cuatro dardos y un misil mágico.", "cost":27500, "final":true, "sources":5, "mecha":true}
 			]},
