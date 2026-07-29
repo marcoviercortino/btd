@@ -48,6 +48,17 @@ static func upgrade_branches(kind: int) -> Array:
 				data["banana_value"] = 35 if final else 8
 				data["heal"] = 8 if final else 2
 				data["spike_count"] = 3 if final else 1
+				# Las torres de apoyo convierten la rama de Poder en su habilidad principal.
+				if kind == 5:
+					var banana_bonus: int = [10, 14, 18, 25, 45][level]
+					data["name"] = ["Cosecha rica", "Racimos dorados", "Cultivo experto", "Finca prospera", "DEFINITIVA: Imperio banana"][level]
+					data["description"] = "Cada banana producida vale $%d mas." % banana_bonus
+					data["banana_value"] = banana_bonus
+				if kind == 6:
+					var healing_bonus: int = [3, 4, 5, 7, 16][level]
+					data["name"] = ["Balsamo mejorado", "Marea reparadora", "Pulso coral", "Ola vital", "DEFINITIVA: Santuario marino"][level]
+					data["description"] = "Cada curacion recupera %d vidas extra." % healing_bonus
+					data["heal"] = healing_bonus
 			elif branch == 1:
 				data["range"] = 75 if final else 18
 				data["projectile_range"] = 120 if final else 30
