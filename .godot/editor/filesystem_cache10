@@ -15,7 +15,7 @@ win.wav::AudioStreamWAV::7009733460974715173::1785236042::1785236131::1::::<><><
 moab_broken.svg::CompressedTexture2D::661703403811376103::1785250922::1785250934::1::::<><><>0<>0<>07132818e1a0209862bb4db8d2f4e645<>res://.godot/imported/moab_broken.svg-a644219bbcccc0efec20d5138f3aecac.ctex::
 moab_damaged.svg::CompressedTexture2D::7372904086591822416::1785250921::1785250934::1::::<><><>0<>0<>fa5be04a18d7702c90a26fe645aff407<>res://.godot/imported/moab_damaged.svg-11d7b94189b1dd410059089d5f1b3cab.ctex::
 moab_happy.svg::CompressedTexture2D::1729199425668908384::1785250301::1785250350::1::::<><><>0<>0<>29ff2022dbab0dbd7da6e1b4a2cc150b<>res://.godot/imported/moab_happy.svg-21c1f8d39d446b976fc7f6a2adfa00e0.ctex::
-::res://assets/characters/::1785329998
+::res://assets/characters/::1785333959
 banana_farmer.svg::CompressedTexture2D::7994041028861437499::1785236215::1785236245::1::::<><><>0<>0<>d1a991411e3436ba16aeb48b12b537e9<>res://.godot/imported/banana_farmer.svg-e5813e743d9d0e67a1dfd78c0a469962.ctex::
 bombardier.png::CompressedTexture2D::4231679078167601598::1785200752::1785201004::1::::<><><>0<>0<>b2a66c2690b16e1dd0a45181d81d4669<>res://.godot/imported/bombardier.png-a50d513503b222a5efd5fd0e59ca7d7f.ctex::
 bombardier.svg::CompressedTexture2D::7247132365161593677::1785200835::1785201004::1::::<><><>0<>0<>386c23c69c490cbc62112cf08bd82e86<>res://.godot/imported/bombardier.svg-b44c44a8e464dc7aadf096845f660f24.ctex::
@@ -45,8 +45,8 @@ boomerang.svg::CompressedTexture2D::6446661899332057263::1785242213::1785242226:
 ::res://export_templates/::1785187356
 ::res://feature_profiles/::1785187356
 ::res://scripts/::1785241106
-game_sound.gd::GDScript::2658819998818871204::1785333880::0::1::::GameSound<>Node<><>0<>0<><>::
-main.gd::GDScript::3190628593635555509::1785333932::0::1::::<>Node2D<><>0<>0<><>::
+game_sound.gd::GDScript::2658819998818871204::1785335738::0::1::::GameSound<>Node<><>0<>0<><>::
+main.gd::GDScript::3190628593635555509::1785335740::0::1::::<>Node2D<><>0<>0<><>::
 map_catalog.gd::GDScript::7564190244940966043::1785245337::0::1::::MapCatalog<>RefCounted<><>0<>0<><>::
 remote_prediction.gd::GDScript::6028864848802364766::1785242848::0::1::::RemotePrediction<>RefCounted<><>0<>0<><>::
 tower_catalog.gd::GDScript::8982837337347372000::1785262322::0::1::::TowerCatalog<>RefCounted<><>0<>0<><>::

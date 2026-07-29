@@ -565,8 +565,13 @@ func update_towers(delta: float) -> void:
 		tower.cooldown -= delta
 		if tower.type == 6:
 			if tower.cooldown <= 0.0:
+				var lives_before_heal := lives
 				lives = min(150, lives + int(tower.get("heal_amount", 8)))
 				tower.cooldown = tower.reload
+				if lives > lives_before_heal:
+					tower.effective_healing = int(tower.get("effective_healing", 0)) + lives - lives_before_heal
+					if game_sound:
+						game_sound.play_heal_effect()
 			continue
 		if tower.type == 8:
 			if tower.cooldown <= 0.0:
@@ -639,13 +644,14 @@ func choose_tower_target(tower: Dictionary) -> int:
 	return chosen_index
 
 func update_banana_farms(delta: float) -> void:
-	for farm in towers:
+	for farm_index in range(towers.size()):
+		var farm: Dictionary = towers[farm_index]
 		if farm.type != 5:
 			continue
 		farm.banana_timer += delta
 		if farm.banana_timer >= float(farm.get("banana_interval", 8.0)):
 			farm.banana_timer = 0.0
-			bananas.append({"id": next_banana_id, "position": farm.position + Vector2(rng.randf_range(-34, 34), rng.randf_range(-28, 28)), "value": int(farm.get("banana_value", 30)), "age": 0.0, "brown_stage": 0, "collecting": false})
+			bananas.append({"id": next_banana_id, "owner": farm_index, "position": farm.position + Vector2(rng.randf_range(-34, 34), rng.randf_range(-28, 28)), "value": int(farm.get("banana_value", 30)), "age": 0.0, "brown_stage": 0, "collecting": false})
 			next_banana_id += 1
 	if banana_popup_time > 0.0:
 		banana_popup_time -= delta
@@ -672,6 +678,7 @@ func cast_chain_lightning(origin: Vector2, first_target: int, owner_index: int) 
 	var used_ids: Dictionary = {}
 	var current_index := first_target
 	var max_jumps: int = int(towers[owner_index].get("chain_hits", 5)) if owner_index >= 0 and owner_index < towers.size() else 5
+	var lightning_damage: int = int(towers[owner_index].get("damage", 1)) if owner_index >= 0 and owner_index < towers.size() else 1
 	for _jump in range(max_jumps):
 		if current_index < 0 or current_index >= balloons.size():
 			break
@@ -679,7 +686,8 @@ func cast_chain_lightning(origin: Vector2, first_target: int, owner_index: int) 
 		var target_id: int = int(balloons[current_index].get("id", current_index))
 		chain_points.append(target_position)
 		used_ids[target_id] = true
-		damage_balloon(current_index, 1, "magic", owner_index)
+		# Cada salto conserva el daño actual del mago, incluidas sus mejoras de poder.
+		damage_balloon(current_index, lightning_damage, "magic", owner_index)
 		var next_index := -1
 		var best_distance := INF
 		var origin_point := chain_points[chain_points.size() - 1]
@@ -695,6 +703,8 @@ func cast_chain_lightning(origin: Vector2, first_target: int, owner_index: int) 
 				next_index = i
 		current_index = next_index
 	lightning_effects.append({"points": chain_points, "time": 0.78})
+	if game_sound:
+		game_sound.play_lightning_cast_effect()
 
 func update_lightning_effects(delta: float) -> void:
 	for i in range(lightning_effects.size() - 1, -1, -1):
@@ -1285,7 +1295,7 @@ func place_tower_local(position: Vector2, tower_kind: int) -> void:
 		"reload": config.reload,
 		"projectile_speed": config.projectile_speed,
 		"projectile_range": config.projectile_range, "thermal_vision": config.thermal_vision,
-		"cooldown": 0.0, "banana_timer": 0.0, "target_mode": 0, "primary_branch": -1, "secondary_branch": -1, "branch_levels": [0, 0, 0], "banana_value": 30, "banana_interval": 8.0, "heal_amount": 8, "chain_hits": 5, "explosion_radius": 68.0, "spike_count": 4, "damage_dealt": 0, "bloons_popped": 0, "color": TOWER_COLORS[tower_kind], "type": tower_kind, "cost": TOWER_COSTS[tower_kind]
+		"cooldown": 0.0, "banana_timer": 0.0, "target_mode": 0, "primary_branch": -1, "secondary_branch": -1, "branch_levels": [0, 0, 0], "banana_value": 30, "banana_interval": 8.0, "heal_amount": 8, "chain_hits": 5, "explosion_radius": 68.0, "spike_count": 4, "damage_dealt": 0, "bloons_popped": 0, "effective_healing": 0, "banana_money_collected": 0, "color": TOWER_COLORS[tower_kind], "type": tower_kind, "cost": TOWER_COSTS[tower_kind]
 	})
 	if multiplayer_mode:
 		active_player = 2 if active_player == 1 else 1
@@ -1335,6 +1345,9 @@ func collect_banana_index(index: int) -> void:
 	if index < 0 or index >= bananas.size():
 		return
 	money += bananas[index].value
+	var owner_index: int = int(bananas[index].get("owner", -1))
+	if owner_index >= 0 and owner_index < towers.size() and int(towers[owner_index].get("type", -1)) == 5:
+		towers[owner_index].banana_money_collected = int(towers[owner_index].get("banana_money_collected", 0)) + int(bananas[index].value)
 	banana_popup_position = bananas[index].position
 	banana_popup_value = bananas[index].value
 	banana_popup_time = 0.85
@@ -3598,6 +3611,10 @@ func draw_inspected_tower_menu() -> void:
 		draw_string(font, Vector2(1418, 867) + menu_offset, "›", HORIZONTAL_ALIGNMENT_LEFT, -1, 27, Color.WHITE)
 		draw_centered(target_modes[target_mode], Vector2(1321, 866) + menu_offset, 17, Color("f4d66d"))
 	draw_string(font, Vector2(995, 896) + menu_offset, "Daño total: %d   ·   Globos explotados: %d" % [int(tower.get("damage_dealt", 0)), int(tower.get("bloons_popped", 0))], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("d9eef4"))
+	if kind == 6 or kind == 5:
+		draw_rect(Rect2(Vector2(990, 875) + menu_offset, Vector2(500, 30)), Color(0.06, 0.14, 0.20, 1.0))
+		var support_stat := "Curación total: %d" % int(tower.get("effective_healing", 0)) if kind == 6 else "Dinero recogido: $%d" % int(tower.get("banana_money_collected", 0))
+		draw_string(font, Vector2(995, 896) + menu_offset, support_stat, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("d9eef4"))
 	var branches: Array = TowerCatalogScript.upgrade_branches(kind)
 	var levels: Array = tower.get("branch_levels", [0, 0, 0])
 	var primary_branch: int = int(tower.get("primary_branch", -1))

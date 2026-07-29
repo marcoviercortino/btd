@@ -432,3 +432,46 @@ func play_vs_intro_effect() -> void:
 		var sample := (rumble + crackle + strike) * envelope
 		playback.push_frame(Vector2(sample, sample))
 	get_tree().create_timer(duration + 0.08).timeout.connect(player.queue_free)
+
+func play_heal_effect() -> void:
+	# Dos tonos limpios ascendentes, suaves para no cansar durante curaciones repetidas.
+	var player := AudioStreamPlayer.new()
+	var stream := AudioStreamGenerator.new()
+	stream.mix_rate = 22050.0
+	stream.buffer_length = 0.30
+	player.stream = stream
+	player.volume_db = -9.0 + effects_volume_offset()
+	add_child(player)
+	player.play()
+	var playback := player.get_stream_playback()
+	var duration := 0.20
+	for frame in range(int(duration * stream.mix_rate)):
+		var time := float(frame) / stream.mix_rate
+		var note := 698.46 if time < 0.09 else 1046.5
+		var local_time := fposmod(time, 0.10)
+		var envelope := exp(-local_time * 23.0)
+		var sample := (sin(TAU * note * time) + sin(TAU * note * 1.5 * time) * 0.18) * envelope * 0.22
+		playback.push_frame(Vector2(sample, sample))
+	get_tree().create_timer(duration + 0.06).timeout.connect(player.queue_free)
+
+func play_lightning_cast_effect() -> void:
+	# Chisporroteo de alta frecuencia con una descarga inicial para el rayo del mago.
+	var player := AudioStreamPlayer.new()
+	var stream := AudioStreamGenerator.new()
+	stream.mix_rate = 22050.0
+	stream.buffer_length = 0.34
+	player.stream = stream
+	player.volume_db = -8.0 + effects_volume_offset()
+	add_child(player)
+	player.play()
+	var playback := player.get_stream_playback()
+	var duration := 0.24
+	for frame in range(int(duration * stream.mix_rate)):
+		var time := float(frame) / stream.mix_rate
+		var envelope := exp(-time * 11.0)
+		var crackle_gate := sin(TAU * 31.0 * time) > 0.30
+		var crackle := (sin(TAU * 1680.0 * time) + sin(TAU * 2470.0 * time) * 0.42) * 0.20 if crackle_gate else 0.0
+		var zap := sin(TAU * lerpf(980.0, 380.0, time / duration) * time) * exp(-time * 22.0) * 0.28
+		var sample := (crackle + zap) * envelope
+		playback.push_frame(Vector2(sample, sample))
+	get_tree().create_timer(duration + 0.06).timeout.connect(player.queue_free)
