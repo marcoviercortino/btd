@@ -56,14 +56,14 @@ static func upgrade_branches(kind: int) -> Array:
 				{"name":"Dardos afilados", "description":"+1 daño.", "cost":200, "damage":1},
 				{"name":"Dardos perforantes", "description":"Atraviesa hasta 2 globos.", "cost":300, "pierce":2},
 				{"name":"El dardo más grande", "description":"+1 daño, tamaño mayor y atraviesa 7 globos.", "cost":1950, "damage":1, "pierce":7, "dart_scale":1.8},
-				{"name":"El GRAN dardo", "description":"Habilidad: dardo gigante de 5 daño cada 40 s.", "cost":2300, "giant_ability":true, "ability_cooldown":40.0},
-				{"name":"D.A.R.D.O.", "description":"Ataque: GRAN dardo de 5 daño y 600 alcance. -50% ataque. Habilidad: +150% durante 5 s.", "cost":24000, "final":true, "dart_giant":true, "damage":2, "dart_scale":3.0, "projectile_range":340, "projectile_speed_mult":0.72, "attack_rate_mult":0.5}
+				{"name":"El GRAN dardo", "description":"Habilidad: GRAN dardo enorme de 15 daño cada 40 s.", "cost":2300, "giant_ability":true, "ability_cooldown":40.0},
+				{"name":"D.A.R.D.O.", "description":"Ataque: GRAN dardo enorme de 15 daño y 600 alcance. -50% ataque. Habilidad: +150% durante 5 s.", "cost":24000, "final":true, "dart_giant":true, "damage":12, "dart_scale":5.0, "projectile_range":340, "projectile_speed_mult":0.72, "attack_rate_mult":0.5}
 			]},
 			{"name":"Entrenamiento", "levels":[
 				{"name":"Entrenamiento de campo", "description":"Más alcance y visión térmica.", "cost":350, "range":25, "thermal_vision":true},
 				{"name":"Rapidez", "description":"+30% velocidad de ataque.", "cost":300, "attack_rate_mult":1.3},
 				{"name":"Auto-dardo", "description":"Ráfagas de 5; +30% ataque y +100% velocidad de proyectil.", "cost":2750, "attack_rate_mult":1.3, "burst":5, "projectile_speed_mult":2.0},
-				{"name":"Doble cañón", "description":"Dos fuentes de disparo y dos objetivos.", "cost":3200, "sources":2},
+				{"name":"Doble cañón", "description":"Dos fuentes y dos objetivos. Los dardos duran hasta 10 s o el impacto.", "cost":3200, "sources":2, "persistent_darts":true},
 				{"name":"Mecha-dardo", "description":"Cinco fuentes: cuatro dardos y un misil mágico.", "cost":27500, "final":true, "sources":5, "mecha":true}
 			]},
 			{"name":"Pirotecnia", "levels":[

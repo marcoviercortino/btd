@@ -613,7 +613,9 @@ func update_towers(delta: float) -> void:
 				var dart_pierce: int = int(tower.get("pierce", 0))
 				if tower.type == 0 and tower.get("dart_giant", false): dart_pierce = 999
 				var source_damage: int = int(tower.damage) + (2 if tower.type == 0 and tower.get("mecha", false) else 0)
-				var projectile := {"id": next_projectile_id, "owner": tower_index, "position": source_origin, "target": target_index, "target_position": locked_target_position, "damage": source_damage, "damage_type": tower.damage_type, "speed": tower.projectile_speed, "color": tower.color, "direction": shot_direction, "kind": tower.type, "remaining": tower.projectile_range, "hit_ids": [], "pierce": dart_pierce, "scale": float(tower.get("dart_scale", 1.0)), "fire": bool(tower.get("fire", false)), "split": int(tower.get("split", 0)), "child_split": int(tower.get("child_split", 0)), "homing": bool(tower.get("homing", false)), "kingdom": bool(tower.get("kingdom", false)), "division_depth": 0}
+				var persistent_dart: bool = bool(tower.get("persistent_darts", false))
+				var projectile_remaining: float = float(tower.projectile_speed) * 10.0 if persistent_dart else float(tower.projectile_range)
+				var projectile := {"id": next_projectile_id, "owner": tower_index, "position": source_origin, "target": target_index, "target_position": locked_target_position, "damage": source_damage, "damage_type": tower.damage_type, "speed": tower.projectile_speed, "color": tower.color, "direction": shot_direction, "kind": tower.type, "remaining": projectile_remaining, "hit_ids": [], "pierce": dart_pierce, "scale": float(tower.get("dart_scale", 1.0)), "free_flying": persistent_dart, "remove_on_hit": persistent_dart, "fire": bool(tower.get("fire", false)), "split": int(tower.get("split", 0)), "child_split": int(tower.get("child_split", 0)), "homing": bool(tower.get("homing", false)), "kingdom": bool(tower.get("kingdom", false)), "division_depth": 0}
 				if tower.type == 1:
 					var chord: Vector2 = locked_target_position - tower.position
 					# El radio base de 80 corresponde al alcance base del bumerÃ¡n (180).
@@ -703,7 +705,8 @@ func fire_extra_dart_sources(tower: Dictionary, tower_index: int, source_count: 
 		var direction: Vector2 = (target_position - origin).normalized()
 		for shot in range(int(tower.get("burst", 1))):
 			var spread := (float(shot) - float(int(tower.get("burst", 1)) - 1) * 0.5) * 0.055
-			projectiles.append({"id":next_projectile_id, "owner":tower_index, "position":origin, "target":target_index, "target_position":target_position, "damage":int(tower.damage) + (2 if tower.get("mecha", false) else 0), "damage_type":tower.damage_type, "speed":tower.projectile_speed, "color":tower.color, "direction":direction.rotated(spread), "kind":0, "remaining":tower.projectile_range, "hit_ids":[], "pierce":dart_pierce, "scale":float(tower.get("dart_scale", 1.0)), "fire":bool(tower.get("fire", false)), "split":int(tower.get("split", 0)), "child_split":int(tower.get("child_split", 0)), "homing":bool(tower.get("homing", false)), "kingdom":bool(tower.get("kingdom", false)), "division_depth":0})
+			var persistent_dart: bool = bool(tower.get("persistent_darts", false))
+			projectiles.append({"id":next_projectile_id, "owner":tower_index, "position":origin, "target":target_index, "target_position":target_position, "damage":int(tower.damage) + (2 if tower.get("mecha", false) else 0), "damage_type":tower.damage_type, "speed":tower.projectile_speed, "color":tower.color, "direction":direction.rotated(spread), "kind":0, "remaining":float(tower.projectile_speed) * 10.0 if persistent_dart else tower.projectile_range, "hit_ids":[], "pierce":dart_pierce, "scale":float(tower.get("dart_scale", 1.0)), "free_flying":persistent_dart, "remove_on_hit":persistent_dart, "fire":bool(tower.get("fire", false)), "split":int(tower.get("split", 0)), "child_split":int(tower.get("child_split", 0)), "homing":bool(tower.get("homing", false)), "kingdom":bool(tower.get("kingdom", false)), "division_depth":0})
 			next_projectile_id += 1
 	if source_count >= 5 and tower.get("mecha", false):
 		var missile_target := choose_tower_target_for_source(tower, 4, 600.0)
@@ -828,6 +831,11 @@ func update_projectiles(delta: float) -> void:
 	for i in range(projectiles.size() - 1, -1, -1):
 		var p := projectiles[i]
 		var previous_position: Vector2 = p.position
+		if float(p.get("temporary_pierce_time", 0.0)) > 0.0:
+			p.temporary_pierce_time = maxf(0.0, float(p.temporary_pierce_time) - delta)
+			if float(p.temporary_pierce_time) <= 0.0:
+				p.pierce = 0
+				p.remove_on_hit = bool(p.get("remove_after_pierce", true))
 		if p.kind == 4 or p.kind == 1 or int(p.get("pierce", 0)) > 0 or p.get("free_flying", false):
 			if p.kind == 1:
 				var angular_step: float = p.speed / p.circle_radius * delta
@@ -853,7 +861,10 @@ func update_projectiles(delta: float) -> void:
 						if j >= balloons.size():
 							continue
 					damage_balloon(j, p.damage, str(p.get("damage_type", "physical")), int(p.get("owner", -1)))
-					if int(p.get("split", 0)) > 0:
+					if p.get("remove_on_hit", false):
+						p.remaining = 0.0
+						break
+					if int(p.get("split", 0)) > 0 and float(p.get("temporary_pierce_time", 0.0)) <= 0.0:
 						spawn_dart_divisions(p, p.position)
 						p.remaining = 0.0
 						break
@@ -921,6 +932,10 @@ func spawn_dart_divisions(parent: Dictionary, origin: Vector2) -> void:
 		projectile.position = origin
 		projectile.target = -1
 		projectile.free_flying = true
+		projectile.temporary_pierce_time = 0.5
+		projectile.pierce = 999
+		projectile.remove_on_hit = false
+		projectile.remove_after_pierce = true
 		projectile.direction = Vector2(parent.get("direction", Vector2.RIGHT)).rotated(angle)
 		projectile.remaining = float(parent.get("remaining", 260.0)) * 0.72
 		projectile.hit_ids = []
@@ -1577,7 +1592,7 @@ func execute_tower_ability(_kind: int) -> void:
 		if target < 0:
 			return
 		var direction: Vector2 = (point_on_path(balloons[target].distance) - tower.position).normalized()
-		projectiles.append({"id": next_projectile_id, "owner":tower_index, "position":tower.position, "target":target, "target_position":point_on_path(balloons[target].distance), "damage":5, "damage_type":"physical", "speed":430.0, "color":Color("f4d66d"), "direction":direction, "kind":0, "remaining":600.0, "hit_ids":[], "pierce":999, "scale":3.0})
+		projectiles.append({"id": next_projectile_id, "owner":tower_index, "position":tower.position, "target":target, "target_position":point_on_path(balloons[target].distance), "damage":15, "damage_type":"physical", "speed":430.0, "color":Color("f4d66d"), "direction":direction, "kind":0, "remaining":600.0, "hit_ids":[], "pierce":999, "scale":5.0})
 		next_projectile_id += 1
 		return
 
@@ -1651,7 +1666,14 @@ func sell_inspected_tower() -> void:
 	if inspected_tower_index < 0 or inspected_tower_index >= towers.size():
 		inspected_tower_index = -1
 		return
-	var refund: int = int(round(float(towers[inspected_tower_index].get("cost", 0)) * 0.6))
+	var sold_tower: Dictionary = towers[inspected_tower_index]
+	# Las definitivas pertenecen a la torre que las compró: al venderla se libera
+	# su cupo para que otra torre del mismo tipo pueda alcanzar ese nivel 5.
+	var sold_levels: Array = sold_tower.get("branch_levels", [0, 0, 0])
+	for branch in range(mini(3, sold_levels.size())):
+		if int(sold_levels[branch]) >= 5:
+			ultimate_tower_types.erase("%d_%d" % [int(sold_tower.get("type", -1)), branch])
+	var refund: int = int(round(float(sold_tower.get("cost", 0)) * 0.6))
 	money += refund
 	towers.remove_at(inspected_tower_index)
 	inspected_tower_index = -1
@@ -1737,7 +1759,7 @@ func upgrade_inspected_tower(branch: int) -> void:
 	if upgrade.has("sources"): tower.sources = int(upgrade.sources)
 	if upgrade.has("thermal_vision"): tower.thermal_vision = bool(upgrade.thermal_vision)
 	if upgrade.has("projectile_speed_mult"): tower.projectile_speed *= float(upgrade.projectile_speed_mult)
-	for feature in ["giant_ability", "dart_giant", "mecha", "fire", "split", "child_split", "homing", "kingdom", "ability_cooldown"]:
+	for feature in ["giant_ability", "dart_giant", "mecha", "fire", "split", "child_split", "homing", "kingdom", "persistent_darts", "ability_cooldown"]:
 		if upgrade.has(feature): tower[feature] = upgrade[feature]
 	if int(tower.type) != 5 and (upgrade.has("reload_mult") or upgrade.has("attack_rate_mult")):
 		var previous_reload: float = float(tower.reload)
