@@ -12,7 +12,7 @@ static func config(kind: int) -> Dictionary:
 		{"range": 155.0, "damage": 1, "damage_type": "magic", "reload": 2.0, "projectile_speed": 360.0, "projectile_range": 260.0, "thermal_vision": false},
 		{"range": 120.0, "damage": 1, "damage_type": "magic", "reload": 2.15, "projectile_speed": 0.0, "projectile_range": 0.0, "thermal_vision": false},
 		{"range": 240.0, "damage": 1, "damage_type": "magic", "reload": 1.1, "projectile_speed": 940.0, "projectile_range": 520.0, "thermal_vision": true},
-		{"range": 0.0, "damage": 0, "damage_type": "none", "reload": 0.0, "projectile_speed": 0.0, "projectile_range": 0.0, "thermal_vision": false},
+		{"range": 115.0, "damage": 0, "damage_type": "none", "reload": 0.0, "projectile_speed": 0.0, "projectile_range": 0.0, "thermal_vision": false},
 		{"range": 0.0, "damage": 0, "damage_type": "none", "reload": 6.0, "projectile_speed": 0.0, "projectile_range": 0.0, "thermal_vision": false},
 		{"range": 90.0, "damage": 2, "damage_type": "physical", "reload": 1.75, "projectile_speed": 0.0, "projectile_range": 0.0, "thermal_vision": false},
 		{"range": 130.0, "damage": 1, "damage_type": "physical", "reload": 7.0, "projectile_speed": 0.0, "projectile_range": 0.0, "thermal_vision": true}

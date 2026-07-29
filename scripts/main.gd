@@ -658,7 +658,10 @@ func update_banana_farms(delta: float) -> void:
 		if farm.banana_timer >= float(farm.get("banana_interval", 8.0)):
 			farm.banana_timer = 0.0
 			var base_banana_value: int = int(farm.get("banana_value", 30))
-			bananas.append({"id": next_banana_id, "owner": farm_index, "position": farm.position + Vector2(rng.randf_range(-34, 34), rng.randf_range(-28, 28)), "base_value": base_banana_value, "value": base_banana_value, "age": 0.0, "brown_stage": 0, "collecting": false})
+			var spawn_angle := rng.randf_range(0.0, TAU)
+			var spawn_distance := sqrt(rng.randf()) * float(farm.get("range", 115.0))
+			var banana_position: Vector2 = farm.position + Vector2.from_angle(spawn_angle) * spawn_distance
+			bananas.append({"id": next_banana_id, "owner": farm_index, "position": banana_position, "base_value": base_banana_value, "value": base_banana_value, "age": 0.0, "brown_stage": 0, "collecting": false})
 			next_banana_id += 1
 	if banana_popup_time > 0.0:
 		banana_popup_time -= delta
@@ -1515,11 +1518,20 @@ func upgrade_inspected_tower(branch: int) -> void:
 	tower.explosion_radius = float(tower.get("explosion_radius", 68.0)) + float(upgrade.get("explosion", 0.0))
 	tower.chain_hits = int(tower.get("chain_hits", 5)) + int(upgrade.get("chain", 0))
 	tower.banana_value = int(tower.get("banana_value", 30)) + int(upgrade.get("banana_value", 0))
-	tower.banana_interval = maxf(2.0, float(tower.get("banana_interval", 8.0)) + float(upgrade.get("banana_interval", 0.0)))
+	var previous_banana_interval: float = float(tower.get("banana_interval", 8.0))
+	tower.banana_interval = maxf(2.0, previous_banana_interval + float(upgrade.get("banana_interval", 0.0)))
+	if int(tower.type) == 5 and previous_banana_interval > 0.0:
+		# Conserva el progreso proporcional del ciclo actual al acelerar la producción.
+		tower.banana_timer = clampf(float(tower.get("banana_timer", 0.0)) * float(tower.banana_interval) / previous_banana_interval, 0.0, float(tower.banana_interval))
 	tower.heal_amount = int(tower.get("heal_amount", 8)) + int(upgrade.get("heal", 0))
 	tower.spike_count = int(tower.get("spike_count", 4)) + int(upgrade.get("spike_count", 0))
 	if upgrade.has("reload_mult"):
+		var previous_reload: float = float(tower.reload)
 		tower.reload *= float(upgrade.reload_mult)
+		# En la Médica, el ritmo es velocidad de casteo: el enfriamiento actual
+		# también se acorta proporcionalmente para que la mejora tenga efecto inmediato.
+		if int(tower.type) == 6 and previous_reload > 0.0:
+			tower.cooldown *= float(tower.reload) / previous_reload
 	var is_ultimate := bool(upgrade.get("final", false))
 	if is_ultimate:
 		ultimate_tower_types[ultimate_key] = true
@@ -3637,7 +3649,17 @@ func draw_inspected_tower_menu() -> void:
 	draw_texture_rect(tower_texture_for(kind), Rect2(Vector2(995, 790) + menu_offset, Vector2(88, 88)), false)
 	draw_string(font, panel.position + Vector2(125, 110), "Visión térmica: %s" % ("SÍ" if tower.get("thermal_vision", false) else "NO"), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("f4d66d") if tower.get("thermal_vision", false) else Color("9ebfcf"))
 	draw_string(font, Vector2(1100, 810) + menu_offset, TOWER_NAMES[kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 25, Color.WHITE)
-	draw_string(font, Vector2(1100, 842) + menu_offset, "Daño %d · Alcance %d · Ataque %.2f s" % [tower.damage, tower.range, float(tower.get("reload", 0.0))], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("bdd1de"))
+	var primary_stat := "Daño %d" % tower.damage
+	if kind == 6:
+		primary_stat = "Curación %d" % int(tower.get("heal_amount", 8))
+	elif kind == 5:
+		primary_stat = "Banana $%d" % int(tower.get("banana_value", 30))
+	var timing_label := "Ataque"
+	var timing_value: float = float(tower.get("reload", 0.0))
+	if kind == 5:
+		timing_label = "Generación"
+		timing_value = float(tower.get("banana_interval", 8.0))
+	draw_string(font, Vector2(1100, 842) + menu_offset, "%s · Alcance %d · %s %.2f s" % [primary_stat, tower.range, timing_label, timing_value], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("bdd1de"))
 	if kind != 5 and kind != 6 and kind != 8:
 		var target_modes := ["PRIMERO", "ÚLTIMO", "MÁS FUERTE", "MÁS DÉBIL"]
 		var target_mode: int = int(tower.get("target_mode", 0))
