@@ -8,8 +8,6 @@ const CATEGORY_IDS := [1, 1, 1, 1, 2, 3, 3, 2, 2]
 const CATEGORY_NAMES := ["TIRADORES", "VERSÁTILES", "CONTROLADORES", "APOYO"]
 const CATEGORY_ICONS := ["⌖", "◆", "⌂", "+"]
 const CATEGORY_COLORS := [Color("ef6b6b"), Color("65b9d1"), Color("b68be5"), Color("68c99a")]
-const ABILITY_NAMES := ["Ráfaga de dardos", "Torbellino", "Bombardeo", "Tormenta arcana", "Lluvia mística", "Cosecha rápida", "Marea de curación", "Abordaje", "Campo de púas"]
-const ABILITY_COOLDOWNS := [18.0, 22.0, 26.0, 28.0, 24.0, 20.0, 24.0, 22.0, 30.0]
 
 static func category_id(kind: int) -> int:
 	return CATEGORY_IDS[clampi(kind, 0, CATEGORY_IDS.size() - 1)]
@@ -22,10 +20,6 @@ static func category_icon(kind: int) -> String:
 
 static func category_color(kind: int) -> Color:
 	return CATEGORY_COLORS[category_id(kind)]
-
-static func ability_data(kind: int) -> Dictionary:
-	var index := clampi(kind, 0, ABILITY_NAMES.size() - 1)
-	return {"name": ABILITY_NAMES[index], "cooldown": ABILITY_COOLDOWNS[index]}
 
 static func config(kind: int) -> Dictionary:
 	var configs := [
