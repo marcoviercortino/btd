@@ -140,6 +140,9 @@ var rival_beneficios := 200
 var beneficios_timer := 0.0
 var placement_tower := -1
 var hover_tower := -1
+var tower_ability_cooldowns: Dictionary = {}
+var tower_ability_notice := ""
+var tower_ability_notice_time := 0.0
 var cursor_position := Vector2.ZERO
 var local_wave_finished := false
 var rival_wave_finished := false
@@ -239,6 +242,7 @@ func _process(delta: float) -> void:
 		return
 	game_sound.set_music("game")
 	var gameplay_delta := 0.0 if debug_paused else delta * gameplay_speed
+	update_tower_ability_cooldowns(gameplay_delta)
 	match_elapsed += gameplay_delta
 	update_wave(gameplay_delta)
 	update_online_wave_sync(gameplay_delta)
@@ -565,6 +569,8 @@ func update_rival_prediction(delta: float) -> void:
 func update_towers(delta: float) -> void:
 	for tower_index in range(towers.size()):
 		var tower: Dictionary = towers[tower_index]
+		if tower.type == 0 and float(tower.get("overdrive_time", 0.0)) > 0.0:
+			tower.overdrive_time = maxf(0.0, float(tower.overdrive_time) - delta)
 		if tower.type == 5:
 			continue
 		tower.cooldown -= delta
@@ -594,7 +600,9 @@ func update_towers(delta: float) -> void:
 			else:
 				var locked_target_position := point_on_path(balloons[target_index].distance)
 				var shot_direction: Vector2 = (locked_target_position - tower.position).normalized()
-				var projectile := {"id": next_projectile_id, "owner": tower_index, "position": tower.position, "target": target_index, "target_position": locked_target_position, "damage": tower.damage, "damage_type": tower.damage_type, "speed": tower.projectile_speed, "color": tower.color, "direction": shot_direction, "kind": tower.type, "remaining": tower.projectile_range, "hit_ids": []}
+				var dart_pierce: int = int(tower.get("pierce", 0))
+				if tower.type == 0 and tower.get("dart_giant", false): dart_pierce = 999
+				var projectile := {"id": next_projectile_id, "owner": tower_index, "position": tower.position, "target": target_index, "target_position": locked_target_position, "damage": tower.damage, "damage_type": tower.damage_type, "speed": tower.projectile_speed, "color": tower.color, "direction": shot_direction, "kind": tower.type, "remaining": tower.projectile_range, "hit_ids": [], "pierce": dart_pierce, "scale": float(tower.get("dart_scale", 1.0))}
 				if tower.type == 1:
 					var chord: Vector2 = locked_target_position - tower.position
 					# El radio base de 80 corresponde al alcance base del bumerÃ¡n (180).
@@ -613,13 +621,19 @@ func update_towers(delta: float) -> void:
 					projectile.circle_radius = fixed_radius
 					projectile.circle_angle = (tower.position - center).angle()
 					projectile.arc_remaining = TAU
-				projectiles.append(projectile)
-				next_projectile_id += 1
+				var shot_count: int = int(tower.get("burst", 1)) if tower.type == 0 else 1
+				for shot in range(shot_count):
+					var spread: float = (float(shot) - float(shot_count - 1) * 0.5) * 0.055
+					var fired_projectile: Dictionary = projectile.duplicate()
+					fired_projectile.id = next_projectile_id
+					fired_projectile.direction = shot_direction.rotated(spread)
+					projectiles.append(fired_projectile)
+					next_projectile_id += 1
 				if tower.type == 4:
 					game_sound.play_mystic_arrow_effect()
 				else:
 					game_sound.play_effect("dart", -15.0)
-			tower.cooldown = tower.reload
+			tower.cooldown = float(tower.reload) / 2.5 if tower.type == 0 and float(tower.get("overdrive_time", 0.0)) > 0.0 else tower.reload
 
 func choose_tower_target(tower: Dictionary) -> int:
 	var mode: int = int(tower.get("target_mode", 0))
@@ -767,7 +781,7 @@ func update_projectiles(delta: float) -> void:
 	for i in range(projectiles.size() - 1, -1, -1):
 		var p := projectiles[i]
 		var previous_position: Vector2 = p.position
-		if p.kind == 4 or p.kind == 1:
+		if p.kind == 4 or p.kind == 1 or int(p.get("pierce", 0)) > 0:
 			if p.kind == 1:
 				var angular_step: float = p.speed / p.circle_radius * delta
 				p.circle_angle += angular_step
@@ -780,7 +794,10 @@ func update_projectiles(delta: float) -> void:
 				if balloons[j].id not in p.hit_ids and p.position.distance_to(point_on_path(balloons[j].distance)) < float(balloons[j].get("radius", 24.0)):
 					p.hit_ids.append(balloons[j].id)
 					damage_balloon(j, p.damage, str(p.get("damage_type", "physical")), int(p.get("owner", -1)))
-			if (p.kind == 1 and p.arc_remaining <= 0.0) or (p.kind == 4 and p.remaining <= 0.0):
+			if int(p.get("pierce", 0)) > 0 and p.hit_ids.size() > int(p.get("pierce", 0)):
+				projectiles.remove_at(i)
+				continue
+			if (p.kind == 1 and p.arc_remaining <= 0.0) or (p.kind != 1 and p.remaining <= 0.0):
 				projectiles.remove_at(i)
 			continue
 		if p.target < 0 or p.target >= balloons.size():
@@ -1214,6 +1231,11 @@ func _input(event: InputEvent) -> void:
 			if online_mode and Rect2(1640, 850, 230, 62).has_point(mouse):
 				surrender_prompt = true
 				return
+			if not online_mode or active_duel_tab == 0:
+				var ability_kind := tower_ability_button_at(mouse)
+				if ability_kind >= 0:
+					activate_tower_ability(ability_kind)
+					return
 			var button_kind := tower_button_at(mouse)
 			if button_kind >= 0:
 				if money < TOWER_COSTS[button_kind]:
@@ -1313,7 +1335,7 @@ func place_tower_local(position: Vector2, tower_kind: int) -> void:
 		"reload": config.reload, "action_rate": 1.0 / (8.0 if tower_kind == 5 else config.reload) if (tower_kind == 5 or config.reload > 0.0) else 0.0,
 		"projectile_speed": config.projectile_speed,
 		"projectile_range": config.projectile_range, "thermal_vision": config.thermal_vision,
-		"cooldown": 0.0, "banana_timer": 0.0, "target_mode": 0, "primary_branch": -1, "secondary_branch": -1, "branch_levels": [0, 0, 0], "banana_value": 30, "banana_interval": 8.0, "heal_amount": 8, "chain_hits": 5, "explosion_radius": 68.0, "spike_count": 4, "damage_dealt": 0, "bloons_popped": 0, "effective_healing": 0, "banana_money_collected": 0, "color": TOWER_COLORS[tower_kind], "type": tower_kind, "cost": TOWER_COSTS[tower_kind]
+		"cooldown": 0.0, "banana_timer": 0.0, "target_mode": 0, "target_modes": [0, 0, 0, 0, 0], "primary_branch": -1, "secondary_branch": -1, "branch_levels": [0, 0, 0], "pierce": 0, "dart_scale": 1.0, "burst": 1, "sources": 1, "overdrive_time": 0.0, "banana_value": 30, "banana_interval": 8.0, "heal_amount": 8, "chain_hits": 5, "explosion_radius": 68.0, "spike_count": 4, "damage_dealt": 0, "bloons_popped": 0, "effective_healing": 0, "banana_money_collected": 0, "color": TOWER_COLORS[tower_kind], "type": tower_kind, "cost": TOWER_COSTS[tower_kind]
 	})
 	if multiplayer_mode:
 		active_player = 2 if active_player == 1 else 1
@@ -1379,6 +1401,60 @@ func tower_button_at(position: Vector2) -> int:
 			return available[index]
 	return -1
 
+func tower_ability_button_at(position: Vector2) -> int:
+	var available := match_towers()
+	for index in range(available.size()):
+		if tower_ability_rect(index).has_point(position):
+			return available[index]
+	return -1
+
+func tower_ability_rect(slot: int) -> Rect2:
+	var tower_rect := tower_button_rect(slot)
+	return Rect2(tower_rect.position + Vector2(0, tower_rect.size.y + 7), Vector2(tower_rect.size.x, 42))
+
+func update_tower_ability_cooldowns(delta: float) -> void:
+	if tower_ability_notice_time > 0.0:
+		tower_ability_notice_time = maxf(0.0, tower_ability_notice_time - delta)
+	for kind_variant in tower_ability_cooldowns.keys():
+		var kind: int = int(kind_variant)
+		tower_ability_cooldowns[kind] = maxf(0.0, float(tower_ability_cooldowns[kind]) - delta)
+
+func activate_tower_ability(kind: int) -> void:
+	var ability: Dictionary = TowerCatalogScript.ability_data(kind)
+	var remaining: float = float(tower_ability_cooldowns.get(kind, 0.0))
+	if remaining > 0.0:
+		game_sound.play_error_effect()
+		return
+	var cooldown: float = float(ability.cooldown)
+	if kind == 0:
+		for tower in towers:
+			if int(tower.get("type", -1)) == 0 and int(tower.get("branch_levels", [0, 0, 0])[0]) >= 4:
+				cooldown = float(tower.get("ability_cooldown", 40.0))
+				break
+	tower_ability_cooldowns[kind] = cooldown
+	tower_ability_notice = "%s activada" % str(ability.name)
+	tower_ability_notice_time = 1.7
+	# Punto de extensión: las futuras habilidades añaden aquí su efecto real.
+	execute_tower_ability(kind)
+
+func execute_tower_ability(_kind: int) -> void:
+	if _kind != 0:
+		return
+	for tower_index in range(towers.size()):
+		var tower: Dictionary = towers[tower_index]
+		if int(tower.get("type", -1)) != 0 or int(tower.get("branch_levels", [0, 0, 0])[0]) < 4:
+			continue
+		if tower.get("dart_giant", false):
+			tower.overdrive_time = 5.0
+			return
+		var target := choose_tower_target(tower)
+		if target < 0:
+			return
+		var direction: Vector2 = (point_on_path(balloons[target].distance) - tower.position).normalized()
+		projectiles.append({"id": next_projectile_id, "owner":tower_index, "position":tower.position, "target":target, "target_position":point_on_path(balloons[target].distance), "damage":5, "damage_type":"physical", "speed":430.0, "color":Color("f4d66d"), "direction":direction, "kind":0, "remaining":600.0, "hit_ids":[], "pierce":999, "scale":3.0})
+		next_projectile_id += 1
+		return
+
 func match_towers() -> Array[int]:
 	var available: Array[int] = chosen_towers.duplicate()
 	if random_tower >= 0:
@@ -1390,7 +1466,7 @@ func tower_config(kind: int) -> Dictionary:
 
 func tower_button_rect(kind: int) -> Rect2:
 	if solo_modern_mode:
-		return Rect2(1200 + (kind % 2) * 200, 280 + (kind / 2) * 165, 190, 155)
+		return Rect2(1200 + (kind % 2) * 200, 280 + (kind / 2) * 210, 190, 155)
 	return Rect2(22 + kind * 210, 850, 195, 150)
 
 func inspected_menu_offset() -> Vector2:
@@ -1529,6 +1605,14 @@ func upgrade_inspected_tower(branch: int) -> void:
 		tower.action_rate = 1.0 / float(tower.banana_interval)
 	tower.heal_amount = int(tower.get("heal_amount", 8)) + int(upgrade.get("heal", 0))
 	tower.spike_count = int(tower.get("spike_count", 4)) + int(upgrade.get("spike_count", 0))
+	if upgrade.has("pierce"): tower.pierce = int(upgrade.pierce)
+	if upgrade.has("dart_scale"): tower.dart_scale = float(upgrade.dart_scale)
+	if upgrade.has("burst"): tower.burst = int(upgrade.burst)
+	if upgrade.has("sources"): tower.sources = int(upgrade.sources)
+	if upgrade.has("thermal_vision"): tower.thermal_vision = bool(upgrade.thermal_vision)
+	if upgrade.has("projectile_speed_mult"): tower.projectile_speed *= float(upgrade.projectile_speed_mult)
+	for feature in ["giant_ability", "dart_giant", "mecha", "fire", "split", "child_split", "homing", "kingdom", "ability_cooldown"]:
+		if upgrade.has(feature): tower[feature] = upgrade[feature]
 	if int(tower.type) != 5 and (upgrade.has("reload_mult") or upgrade.has("attack_rate_mult")):
 		var previous_reload: float = float(tower.reload)
 		var previous_rate: float = float(tower.get("action_rate", 1.0 / previous_reload if previous_reload > 0.0 else 0.0))
@@ -2006,7 +2090,7 @@ func _draw() -> void:
 	for balloon in balloons:
 		draw_balloon(point_on_path(balloon.distance), balloon)
 	for projectile in projectiles:
-		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT), projectile.kind)
+		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT), projectile.kind, float(projectile.get("scale", 1.0)))
 	draw_solo_bananas()
 	draw_sword_swipes(Vector2.ZERO, Vector2.ONE)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
@@ -2647,6 +2731,8 @@ func draw_solo_modern() -> void:
 	var available := match_towers()
 	for slot in range(available.size()):
 		draw_tower_button(tower_button_rect(slot), available[slot], slot)
+		draw_tower_ability_button(tower_ability_rect(slot), available[slot])
+	draw_tower_ability_notice()
 	draw_tower_tooltip()
 	draw_inspected_tower_menu()
 
@@ -2658,7 +2744,7 @@ func draw_solo_arena() -> void:
 	for balloon in balloons:
 		draw_balloon(point_on_path(balloon.distance), balloon)
 	for projectile in projectiles:
-		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT), projectile.kind)
+		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT), projectile.kind, float(projectile.get("scale", 1.0)))
 	draw_spikes(spikes)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
@@ -2728,6 +2814,8 @@ func draw_online_duel() -> void:
 		var available := match_towers()
 		for slot in range(available.size()):
 			draw_tower_button(tower_button_rect(slot), available[slot], slot)
+			draw_tower_ability_button(tower_ability_rect(slot), available[slot])
+		draw_tower_ability_notice()
 		draw_tower_tooltip()
 	else:
 		draw_balloon_send_buttons(font)
@@ -2902,7 +2990,7 @@ func draw_duel_arena(origin: Vector2, arena_towers: Array, arena_balloons: Array
 	for balloon in arena_balloons:
 		draw_balloon(point_on_path(balloon.distance), balloon)
 	for projectile in arena_projectiles:
-		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT), projectile.kind)
+		draw_dart(projectile.position, projectile.color, projectile.get("direction", Vector2.RIGHT), projectile.kind, float(projectile.get("scale", 1.0)))
 	if arena_towers == towers:
 		draw_spikes(spikes)
 	if arena_towers == towers:
@@ -2976,18 +3064,18 @@ func draw_tower_upgrade_decorations(tower: Dictionary) -> void:
 			var angle: float = float(mark) * TAU / float(maxi(1, rhythm)) - PI * 0.5
 			draw_circle(position + Vector2(cos(angle), sin(angle)) * (36.0 + rhythm * 2.0), 2.4, Color(0.55, 1.0, 0.72, 0.72))
 
-func draw_dart(position: Vector2, color: Color, direction: Vector2, kind := 0) -> void:
+func draw_dart(position: Vector2, color: Color, direction: Vector2, kind := 0, scale := 1.0) -> void:
 	if kind == 1:
 		draw_texture_rect(BOOMERANG_PROJECTILE_TEXTURE, Rect2(position - Vector2(16, 16), Vector2(32, 32)), false)
 		return
 	if kind == 2:
 		draw_texture_rect(BOMB_PROJECTILE_TEXTURE, Rect2(position - Vector2(18, 18), Vector2(36, 36)), false)
 		return
-	var tip := position + direction * 12.0
-	var tail := position - direction * 12.0
-	draw_line(tail, tip, Color("263544"), 5.0)
-	draw_line(tail, tip, color, 2.5)
-	draw_circle(tip, 3.5, Color.WHITE)
+	var tip := position + direction * 12.0 * scale
+	var tail := position - direction * 12.0 * scale
+	draw_line(tail, tip, Color("263544"), 5.0 * scale)
+	draw_line(tail, tip, color, 2.5 * scale)
+	draw_circle(tip, 3.5 * scale, Color.WHITE)
 
 func draw_sword_swipes(origin: Vector2, scale: Vector2, swipe_list := sword_swipes) -> void:
 	if swipe_list.is_empty():
@@ -3019,12 +3107,7 @@ func draw_spikes_at(origin: Vector2, spike_list: Array) -> void:
 func draw_solo_bananas() -> void:
 	# Called while the individual arena already uses its 1.5x world transform.
 	for banana in bananas:
-		var stage: float = clampf(float(banana.get("brown_stage", 0)) / 3.0, 0.0, 1.0)
-		var peel_color := Color("ffe164").lerp(Color("76512c"), stage)
-		var shine_color := Color("fff3a0").lerp(Color("b0804c"), stage)
-		draw_circle(banana.position, 14, Color("5f4328").lerp(Color("3a2a21"), stage))
-		draw_circle(banana.position + Vector2(0, -2), 12, peel_color)
-		draw_arc(banana.position, 9, 0.25, 2.75, 12, shine_color, 3.0)
+		draw_banana_asset(banana.position, int(banana.get("brown_stage", 0)))
 
 func draw_bananas() -> void:
 	draw_banana_group(Vector2(0, 270), bananas)
@@ -3043,13 +3126,30 @@ func draw_rival_bananas() -> void:
 func draw_banana_group(origin: Vector2, banana_list: Array) -> void:
 	draw_set_transform(origin, 0.0, Vector2(0.75, 0.75))
 	for banana in banana_list:
-		var stage: float = clampf(float(banana.get("brown_stage", 0)) / 3.0, 0.0, 1.0)
-		var peel_color := Color("ffe164").lerp(Color("76512c"), stage)
-		var shine_color := Color("fff3a0").lerp(Color("b0804c"), stage)
-		draw_circle(banana.position, 14, Color("5f4328").lerp(Color("3a2a21"), stage))
-		draw_circle(banana.position + Vector2(0, -2), 12, peel_color)
-		draw_arc(banana.position, 9, 0.25, 2.75, 12, shine_color, 3.0)
+		draw_banana_asset(banana.position, int(banana.get("brown_stage", 0)))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+func draw_banana_asset(position: Vector2, brown_stage: int) -> void:
+	# Curved peel silhouette: recognisable as a banana even at the small game scale.
+	var stage := clampi(brown_stage, 0, 3)
+	var peel_colors := [Color("f9d64a"), Color("c6a444"), Color("94703c"), Color("5d412a")]
+	var highlight_colors := [Color("fff3a0"), Color("e6ca78"), Color("b58b54"), Color("79563a")]
+	var outline_colors := [Color("73522a"), Color("634728"), Color("4b3526"), Color("30231e")]
+	var peel: Color = peel_colors[stage]
+	var outline: Color = outline_colors[stage]
+	var curve := PackedVector2Array([
+		position + Vector2(-15, -11), position + Vector2(-14, -3),
+		position + Vector2(-10, 5), position + Vector2(-3, 10),
+		position + Vector2(5, 11), position + Vector2(12, 7),
+		position + Vector2(17, 0), position + Vector2(18, -6)
+	])
+	draw_polyline(curve, outline, 15.0, true)
+	draw_polyline(curve, peel, 10.0, true)
+	draw_polyline(PackedVector2Array([position + Vector2(-12, -5), position + Vector2(-8, 3), position + Vector2(-2, 7), position + Vector2(5, 8), position + Vector2(11, 4)]), highlight_colors[stage], 2.4, true)
+	# Stem and dark tip make the fruit direction clear; both darken with age.
+	draw_line(position + Vector2(-15, -11), position + Vector2(-19, -16), outline, 5.0, true)
+	draw_line(position + Vector2(-18, -16), position + Vector2(-21, -16), Color("3a2b20"), 4.0, true)
+	draw_circle(position + Vector2(18, -6), 3.3, Color("3a2b20"))
 
 func current_map_texture():
 	return MapCatalogScript.TEXTURES[clampi(active_map, 0, MapCatalogScript.TEXTURES.size() - 1)]
@@ -3664,6 +3764,23 @@ func draw_tower_button(rect: Rect2, kind: int, slot: int) -> void:
 	var price_width := font.get_string_size(price_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x
 	draw_string(font, rect.position + Vector2((rect.size.x - price_width) / 2.0, 125), price_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color("ffd76a"))
 	draw_string(font, rect.position + Vector2(32, 145), "Clic para colocar", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("bdd1de"))
+
+func draw_tower_ability_button(rect: Rect2, kind: int) -> void:
+	var ability: Dictionary = TowerCatalogScript.ability_data(kind)
+	var remaining: float = float(tower_ability_cooldowns.get(kind, 0.0))
+	var ready := remaining <= 0.0
+	var fill := TowerCatalogScript.category_color(kind).darkened(0.32) if ready else Color("394653")
+	draw_style_box(make_box(fill, 8), rect)
+	var text := str(ability.name).to_upper() if ready else "ENFRIAMIENTO %.1f s" % remaining
+	draw_centered(text, rect.get_center() + Vector2(0, 6), 13, Color.WHITE if ready else Color("c4ccd1"))
+
+func draw_tower_ability_notice() -> void:
+	if tower_ability_notice_time <= 0.0:
+		return
+	var alpha: float = clampf(tower_ability_notice_time / 0.5, 0.0, 1.0)
+	var rect := Rect2(670, 225, 580, 42)
+	draw_style_box(make_box(Color(0.14, 0.34, 0.42, 0.94 * alpha), 10), rect)
+	draw_centered(tower_ability_notice + " · efecto futuro", rect.get_center() + Vector2(0, 6), 17, Color(0.85, 0.98, 1.0, alpha))
 
 func draw_duel_tabs(font: Font) -> void:
 	var char_color := Color("31546c") if active_duel_tab == 0 else Color("1d4055")

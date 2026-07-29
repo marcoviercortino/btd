@@ -1,13 +1,15 @@
 class_name TowerCatalog
 extends RefCounted
 
-const COSTS := [120, 330, 400, 450, 600, 650, 520, 900, 700]
+const COSTS := [300, 330, 400, 450, 600, 650, 520, 900, 700]
 const NAMES := ["Dardo", "Bumerán", "Bombardero", "Mago", "Arquero místico", "Granja de bananas", "Médica del Arrecife", "Pirata", "Cortasendas"]
 const COLORS := [Color("6cc4ed"), Color("ffcc66"), Color("ef8256"), Color("7aa9ff"), Color("9a7ee8"), Color("ffe164"), Color("62c6a6"), Color("d99055"), Color("9da7ae")]
 const CATEGORY_IDS := [1, 1, 1, 1, 2, 3, 3, 2, 2]
 const CATEGORY_NAMES := ["TIRADORES", "VERSÁTILES", "CONTROLADORES", "APOYO"]
 const CATEGORY_ICONS := ["⌖", "◆", "⌂", "+"]
 const CATEGORY_COLORS := [Color("ef6b6b"), Color("65b9d1"), Color("b68be5"), Color("68c99a")]
+const ABILITY_NAMES := ["Ráfaga de dardos", "Torbellino", "Bombardeo", "Tormenta arcana", "Lluvia mística", "Cosecha rápida", "Marea de curación", "Abordaje", "Campo de púas"]
+const ABILITY_COOLDOWNS := [18.0, 22.0, 26.0, 28.0, 24.0, 20.0, 24.0, 22.0, 30.0]
 
 static func category_id(kind: int) -> int:
 	return CATEGORY_IDS[clampi(kind, 0, CATEGORY_IDS.size() - 1)]
@@ -20,6 +22,10 @@ static func category_icon(kind: int) -> String:
 
 static func category_color(kind: int) -> Color:
 	return CATEGORY_COLORS[category_id(kind)]
+
+static func ability_data(kind: int) -> Dictionary:
+	var index := clampi(kind, 0, ABILITY_NAMES.size() - 1)
+	return {"name": ABILITY_NAMES[index], "cooldown": ABILITY_COOLDOWNS[index]}
 
 static func config(kind: int) -> Dictionary:
 	var configs := [
@@ -50,6 +56,30 @@ static func upgrades(kind: int) -> Array:
 	return paths[kind]
 
 static func upgrade_branches(kind: int) -> Array:
+	if kind == 0:
+		return [
+			{"name":"Dardos afilados", "levels":[
+				{"name":"Dardos afilados", "description":"+1 daño.", "cost":200, "damage":1},
+				{"name":"Dardos perforantes", "description":"Atraviesa hasta 2 globos.", "cost":300, "pierce":2},
+				{"name":"El dardo más grande", "description":"+1 daño, tamaño mayor y atraviesa 7 globos.", "cost":1950, "damage":1, "pierce":7, "dart_scale":1.8},
+				{"name":"El GRAN dardo", "description":"Habilidad: dardo gigante de 5 daño cada 40 s.", "cost":2300, "giant_ability":true, "ability_cooldown":40.0},
+				{"name":"D.A.R.D.O.", "description":"Dardos gigantes normales; -50% ataque. Habilidad: +150% durante 5 s.", "cost":24000, "final":true, "dart_giant":true, "attack_rate_mult":0.5}
+			]},
+			{"name":"Entrenamiento", "levels":[
+				{"name":"Entrenamiento de campo", "description":"Más alcance y visión térmica.", "cost":350, "range":25, "thermal_vision":true},
+				{"name":"Rapidez", "description":"+30% velocidad de ataque.", "cost":300, "attack_rate_mult":1.3},
+				{"name":"Auto-dardo", "description":"Ráfagas de 5; +30% ataque y +100% velocidad de proyectil.", "cost":2750, "attack_rate_mult":1.3, "burst":5, "projectile_speed_mult":2.0},
+				{"name":"Doble cañón", "description":"Dos fuentes de disparo y dos objetivos.", "cost":3200, "sources":2},
+				{"name":"Mecha-dardo", "description":"Cinco fuentes: cuatro dardos y un misil mágico.", "cost":27500, "final":true, "sources":5, "mecha":true}
+			]},
+			{"name":"Pirotecnia", "levels":[
+				{"name":"Dardos pirotecnia", "description":"Daño físico y mágico; quemadura de 2 s.", "cost":750, "fire":true},
+				{"name":"División de dardo", "description":"Al impactar se divide en 2 dardos.", "cost":600, "split":2},
+				{"name":"Mitosis dardil", "description":"Primera división en 5; las hijas se dividen una vez más.", "cost":1750, "split":5, "child_split":2},
+				{"name":"Control remoto", "description":"Las divisiones se guían al globo cercano tras 1,2 s.", "cost":1400, "homing":true},
+				{"name":"Reino de los dardos", "description":"18 divisiones circulares dobles; hijas +50% daño.", "cost":43000, "final":true, "split":18, "kingdom":true}
+			]}
+		]
 	var base_name: String = NAMES[kind]
 	var branches: Array = []
 	var names := [["Potencia", "Impacto", "Arma experta", "Dominio", "DEFINITIVA: Leyenda"], ["Alcance", "Vista aguda", "Control", "Territorio", "DEFINITIVA: Horizonte"], ["Cadencia", "Ritmo vivo", "Aceleración", "Furia", "DEFINITIVA: Tormenta"]]
