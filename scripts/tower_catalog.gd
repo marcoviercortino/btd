@@ -70,7 +70,7 @@ static func upgrade_branches(kind: int) -> Array:
 				{"name":"Dardos pirotecnia", "description":"Daño físico y mágico; quemadura de 2 s.", "cost":750, "fire":true},
 				{"name":"División de dardo", "description":"Al impactar se divide en 2 dardos.", "cost":600, "split":2},
 				{"name":"Mitosis dardil", "description":"Primera división en 5; las hijas se dividen una vez más.", "cost":1750, "split":5, "child_split":2},
-				{"name":"Control remoto", "description":"Las divisiones se guían al globo cercano tras 0,2 s.", "cost":1400, "homing":true},
+				{"name":"Control remoto", "description":"Las divisiones se guían al globo cercano tras 0,5 s.", "cost":1400, "homing":true},
 				{"name":"Reino de los dardos", "description":"18 divisiones circulares dobles; hijas +50% daño.", "cost":43000, "final":true, "split":18, "kingdom":true}
 			]}
 		]

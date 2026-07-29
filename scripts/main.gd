@@ -844,7 +844,7 @@ func update_projectiles(delta: float) -> void:
 				p.position = p.circle_center + Vector2(cos(p.circle_angle), sin(p.circle_angle)) * p.circle_radius
 			else:
 				p.age = float(p.get("age", 0.0)) + delta
-				if p.get("homing", false) and float(p.age) >= 0.2:
+				if p.get("homing", false) and float(p.age) >= 0.5:
 					var homing_target := closest_balloon_to(p.position)
 					if homing_target >= 0:
 						p.direction = (point_on_path(balloons[homing_target].distance) - p.position).normalized()
@@ -932,7 +932,7 @@ func spawn_dart_divisions(parent: Dictionary, origin: Vector2) -> void:
 		projectile.position = origin
 		projectile.target = -1
 		projectile.free_flying = true
-		projectile.temporary_pierce_time = 0.5
+		projectile.temporary_pierce_time = 0.2
 		projectile.pierce = 999
 		projectile.remove_on_hit = false
 		projectile.remove_after_pierce = true

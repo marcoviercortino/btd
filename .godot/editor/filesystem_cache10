@@ -46,9 +46,9 @@ boomerang.svg::CompressedTexture2D::6446661899332057263::1785242213::1785242226:
 ::res://feature_profiles/::1785187356
 ::res://scripts/::1785241106
 game_sound.gd::GDScript::2658819998818871204::1785335911::0::1::::GameSound<>Node<><>0<>0<><>::
-main.gd::GDScript::3190628593635555509::1785355227::0::1::::<>Node2D<><>0<>0<><>::
+main.gd::GDScript::3190628593635555509::1785359605::0::1::::<>Node2D<><>0<>0<><>::
 map_catalog.gd::GDScript::7564190244940966043::1785245337::0::1::::MapCatalog<>RefCounted<><>0<>0<><>::
 remote_prediction.gd::GDScript::6028864848802364766::1785242848::0::1::::RemotePrediction<>RefCounted<><>0<>0<><>::
-tower_catalog.gd::GDScript::8982837337347372000::1785355025::0::1::::TowerCatalog<>RefCounted<><>0<>0<><>::
+tower_catalog.gd::GDScript::8982837337347372000::1785359615::0::1::::TowerCatalog<>RefCounted<><>0<>0<><>::
 ::res://script_templates/::1785187356
 ::res://text_editor_themes/::1785187356
