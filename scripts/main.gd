@@ -462,6 +462,14 @@ func spawn_ceramic_nine_balloon(initial_distance := 0.0, camouflaged := false, r
 
 func update_balloons(delta: float) -> void:
 	for i in range(balloons.size() - 1, -1, -1):
+		if float(balloons[i].get("burn_time", 0.0)) > 0.0:
+			balloons[i].burn_time -= delta
+			balloons[i].burn_tick = float(balloons[i].get("burn_tick", 0.0)) + delta
+			if float(balloons[i].burn_tick) >= 1.0:
+				balloons[i].burn_tick = 0.0
+				damage_balloon(i, 1, "magic", -1)
+				if i >= balloons.size():
+					continue
 		balloons[i].distance += balloons[i].speed * delta
 		for spike_index in range(spikes.size() - 1, -1, -1):
 			if point_on_path(balloons[i].distance).distance_to(spikes[spike_index].position) <= 18.0:
@@ -602,7 +610,7 @@ func update_towers(delta: float) -> void:
 				var shot_direction: Vector2 = (locked_target_position - tower.position).normalized()
 				var dart_pierce: int = int(tower.get("pierce", 0))
 				if tower.type == 0 and tower.get("dart_giant", false): dart_pierce = 999
-				var projectile := {"id": next_projectile_id, "owner": tower_index, "position": tower.position, "target": target_index, "target_position": locked_target_position, "damage": tower.damage, "damage_type": tower.damage_type, "speed": tower.projectile_speed, "color": tower.color, "direction": shot_direction, "kind": tower.type, "remaining": tower.projectile_range, "hit_ids": [], "pierce": dart_pierce, "scale": float(tower.get("dart_scale", 1.0))}
+				var projectile := {"id": next_projectile_id, "owner": tower_index, "position": tower.position, "target": target_index, "target_position": locked_target_position, "damage": tower.damage, "damage_type": tower.damage_type, "speed": tower.projectile_speed, "color": tower.color, "direction": shot_direction, "kind": tower.type, "remaining": tower.projectile_range, "hit_ids": [], "pierce": dart_pierce, "scale": float(tower.get("dart_scale", 1.0)), "fire": bool(tower.get("fire", false)), "split": int(tower.get("split", 0)), "child_split": int(tower.get("child_split", 0)), "homing": bool(tower.get("homing", false)), "kingdom": bool(tower.get("kingdom", false)), "division_depth": 0}
 				if tower.type == 1:
 					var chord: Vector2 = locked_target_position - tower.position
 					# El radio base de 80 corresponde al alcance base del bumerÃ¡n (180).
@@ -821,7 +829,37 @@ func update_projectiles(delta: float) -> void:
 				game_sound.play_explosion_effect()
 			else:
 				damage_balloon(p.target, p.damage, str(p.get("damage_type", "physical")), int(p.get("owner", -1)))
+				if p.get("fire", false) and p.target >= 0 and p.target < balloons.size():
+					damage_balloon(p.target, p.damage, "magic", int(p.get("owner", -1)))
+					balloons[p.target].burn_time = 2.0
+					balloons[p.target].burn_tick = 0.0
+				if int(p.get("split", 0)) > 0:
+					spawn_dart_divisions(p, target_pos)
 			projectiles.remove_at(i)
+
+func spawn_dart_divisions(parent: Dictionary, origin: Vector2) -> void:
+	var count: int = int(parent.get("split", 0))
+	if count <= 0:
+		return
+	var kingdom: bool = bool(parent.get("kingdom", false))
+	for child in range(count):
+		var angle: float = TAU * float(child) / float(count) if kingdom else deg_to_rad(20.0) * (float(child) / float(maxi(1, count - 1)) - 0.5)
+		var projectile: Dictionary = parent.duplicate()
+		projectile.id = next_projectile_id
+		projectile.position = origin
+		projectile.target = -1
+		projectile.direction = Vector2(parent.get("direction", Vector2.RIGHT)).rotated(angle)
+		projectile.remaining = float(parent.get("remaining", 260.0)) * 0.72
+		projectile.hit_ids = []
+		projectile.split = int(parent.get("child_split", 0)) if not kingdom else 18 if int(parent.get("division_depth", 0)) == 0 else 0
+		projectile.child_split = 0
+		projectile.division_depth = int(parent.get("division_depth", 0)) + 1
+		projectile.pierce = int(parent.get("pierce", 0)) + (1 if kingdom else 0)
+		if kingdom:
+			projectile.damage = int(ceili(float(parent.get("damage", 1)) * 1.5))
+		projectile.kingdom = true
+		projectiles.append(projectile)
+		next_projectile_id += 1
 
 func damage_balloon(index: int, damage: int, damage_type := "physical", owner_index := -1) -> void:
 	if index < 0 or index >= balloons.size():
