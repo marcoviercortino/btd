@@ -475,3 +475,25 @@ func play_lightning_cast_effect() -> void:
 		var sample := (crackle + zap) * envelope
 		playback.push_frame(Vector2(sample, sample))
 	get_tree().create_timer(duration + 0.06).timeout.connect(player.queue_free)
+
+func play_mystic_arrow_effect() -> void:
+	# Silbido etéreo ascendente con un brillo cristalino de flecha élfica.
+	var player := AudioStreamPlayer.new()
+	var stream := AudioStreamGenerator.new()
+	stream.mix_rate = 22050.0
+	stream.buffer_length = 0.38
+	player.stream = stream
+	player.volume_db = -9.0 + effects_volume_offset()
+	add_child(player)
+	player.play()
+	var playback := player.get_stream_playback()
+	var duration := 0.27
+	for frame in range(int(duration * stream.mix_rate)):
+		var time := float(frame) / stream.mix_rate
+		var progress := time / duration
+		var frequency := lerpf(540.0, 1440.0, progress)
+		var envelope := sin(PI * progress) * exp(-progress * 0.65)
+		var whistle := sin(TAU * frequency * time) * envelope * 0.20
+		var chime := sin(TAU * 1980.0 * time) * exp(-time * 13.0) * 0.12
+		playback.push_frame(Vector2(whistle + chime, whistle + chime))
+	get_tree().create_timer(duration + 0.06).timeout.connect(player.queue_free)

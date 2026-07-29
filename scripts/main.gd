@@ -106,6 +106,9 @@ var net_sync_timer := 0.0
 var auto_wave_timer := 2.5
 var next_balloon_id := 1
 var next_projectile_id := 1
+var next_combat_effect_id := 1
+var heard_rival_projectile_ids: Dictionary = {}
+var heard_rival_effect_ids: Dictionary = {}
 var next_banana_id := 1
 var loadout_select := false
 var chosen_towers: Array[int] = []
@@ -610,7 +613,10 @@ func update_towers(delta: float) -> void:
 					projectile.arc_remaining = TAU
 				projectiles.append(projectile)
 				next_projectile_id += 1
-				game_sound.play_effect("dart", -15.0)
+				if tower.type == 4:
+					game_sound.play_mystic_arrow_effect()
+				else:
+					game_sound.play_effect("dart", -15.0)
 			tower.cooldown = tower.reload
 
 func choose_tower_target(tower: Dictionary) -> int:
@@ -651,7 +657,8 @@ func update_banana_farms(delta: float) -> void:
 		farm.banana_timer += delta
 		if farm.banana_timer >= float(farm.get("banana_interval", 8.0)):
 			farm.banana_timer = 0.0
-			bananas.append({"id": next_banana_id, "owner": farm_index, "position": farm.position + Vector2(rng.randf_range(-34, 34), rng.randf_range(-28, 28)), "value": int(farm.get("banana_value", 30)), "age": 0.0, "brown_stage": 0, "collecting": false})
+			var base_banana_value: int = int(farm.get("banana_value", 30))
+			bananas.append({"id": next_banana_id, "owner": farm_index, "position": farm.position + Vector2(rng.randf_range(-34, 34), rng.randf_range(-28, 28)), "base_value": base_banana_value, "value": base_banana_value, "age": 0.0, "brown_stage": 0, "collecting": false})
 			next_banana_id += 1
 	if banana_popup_time > 0.0:
 		banana_popup_time -= delta
@@ -663,7 +670,10 @@ func update_banana_farms(delta: float) -> void:
 		if bananas[i].age >= 5.0:
 			brown_stage = mini(3, int(floor((bananas[i].age - 5.0) / 3.0)) + 1)
 		bananas[i].brown_stage = brown_stage
-		bananas[i].value = 30 - brown_stage * 7
+		var brown_value_multiplier: float = [1.0, 0.70, 0.50, 0.20][brown_stage]
+		# Las mejoras elevan el valor base; el deterioro se aplica sobre ese valor.
+		# Ceil conserva una recompensa justa cuando el resultado tiene decimales.
+		bananas[i].value = ceili(float(bananas[i].get("base_value", 30)) * brown_value_multiplier)
 		if cursor_on_map and bananas[i].position.distance_to(cursor_map_position) < 165.0:
 			bananas[i].collecting = true
 			bananas[i].position = bananas[i].position.move_toward(cursor_map_position, 430.0 * delta)
@@ -702,7 +712,8 @@ func cast_chain_lightning(origin: Vector2, first_target: int, owner_index: int) 
 				best_distance = candidate_distance
 				next_index = i
 		current_index = next_index
-	lightning_effects.append({"points": chain_points, "time": 0.78})
+	lightning_effects.append({"id": next_combat_effect_id, "points": chain_points, "time": 0.78})
+	next_combat_effect_id += 1
 	if game_sound:
 		game_sound.play_lightning_cast_effect()
 
@@ -718,7 +729,8 @@ func cast_pirate_sweep(origin: Vector2, target_position: Vector2, owner_index: i
 		var offset: Vector2 = point_on_path(balloons[index].distance) - origin
 		if offset.length() <= 90.0 and facing.dot(offset.normalized()) >= 0.0:
 			damage_balloon(index, 2, "physical", owner_index)
-	sword_swipes.append({"position": origin, "angle": facing.angle(), "time": 0.32})
+	sword_swipes.append({"id": next_combat_effect_id, "position": origin, "angle": facing.angle(), "time": 0.32})
+	next_combat_effect_id += 1
 	if game_sound:
 		game_sound.play_pirate_sword_sweep()
 
@@ -1857,6 +1869,7 @@ func rpc_update_rival(remote_lives: int, remote_money: int, remote_beneficios: i
 	rival_wave = remote_wave
 	rival_towers = remote_towers
 	rival_balloons = remote_balloons
+	play_new_rival_tower_sounds(remote_projectiles_data, remote_lightning, remote_swipes)
 	rival_projectiles = RemotePredictionScript.merge_projectiles(rival_projectiles, remote_projectiles_data)
 	rival_lightning_effects = remote_lightning
 	# Remote bananas never show the owner's magnet movement. They disappear
@@ -1870,6 +1883,29 @@ func rpc_update_rival(remote_lives: int, remote_money: int, remote_beneficios: i
 	rival_defeated = remote_lost
 	if remote_lost and not game_over:
 		won = true
+
+func play_new_rival_tower_sounds(remote_projectiles_data: Array, remote_lightning: Array, remote_swipes: Array) -> void:
+	if not game_sound:
+		return
+	for projectile in remote_projectiles_data:
+		var projectile_id: int = int(projectile.get("id", -1))
+		if projectile_id < 0 or heard_rival_projectile_ids.has(projectile_id):
+			continue
+		heard_rival_projectile_ids[projectile_id] = true
+		if int(projectile.get("kind", 0)) == 4:
+			game_sound.play_mystic_arrow_effect()
+		else:
+			game_sound.play_effect("dart", -15.0)
+	for effect in remote_lightning:
+		var effect_id: int = int(effect.get("id", -1))
+		if effect_id >= 0 and not heard_rival_effect_ids.has("lightning_%d" % effect_id):
+			heard_rival_effect_ids["lightning_%d" % effect_id] = true
+			game_sound.play_lightning_cast_effect()
+	for swipe in remote_swipes:
+		var swipe_id: int = int(swipe.get("id", -1))
+		if swipe_id >= 0 and not heard_rival_effect_ids.has("sword_%d" % swipe_id):
+			heard_rival_effect_ids["sword_%d" % swipe_id] = true
+			game_sound.play_pirate_sword_sweep()
 
 @rpc("any_peer", "reliable")
 func rpc_report_defeat() -> void:
@@ -2405,16 +2441,17 @@ func handle_sound_menu_input(event: InputEvent) -> void:
 			sound_slider_drag = ""
 
 func save_sound_volumes() -> void:
+	save_audio_preferences()
+
+func save_menu_music_track(_track: int) -> void:
+	save_audio_preferences()
+
+func save_audio_preferences() -> void:
 	var settings := ConfigFile.new()
 	settings.load("user://balloon_frontier.cfg")
+	settings.set_value("audio", "menu_track", game_sound.menu_track)
 	settings.set_value("audio", "music_volume", game_sound.music_volume_percent)
 	settings.set_value("audio", "effects_volume", game_sound.effects_volume_percent)
-	settings.save("user://balloon_frontier.cfg")
-
-func save_menu_music_track(track: int) -> void:
-	var settings := ConfigFile.new()
-	settings.load("user://balloon_frontier.cfg")
-	settings.set_value("audio", "menu_track", track)
 	settings.save("user://balloon_frontier.cfg")
 
 func draw_mode_card(rect: Rect2, accent: Color, title: String, description: String, players: String) -> void:
