@@ -4,6 +4,22 @@ extends RefCounted
 const COSTS := [120, 330, 400, 450, 600, 650, 520, 900, 700]
 const NAMES := ["Dardo", "Bumerán", "Bombardero", "Mago", "Arquero místico", "Granja de bananas", "Médica del Arrecife", "Pirata", "Cortasendas"]
 const COLORS := [Color("6cc4ed"), Color("ffcc66"), Color("ef8256"), Color("7aa9ff"), Color("9a7ee8"), Color("ffe164"), Color("62c6a6"), Color("d99055"), Color("9da7ae")]
+const CATEGORY_IDS := [1, 1, 1, 1, 2, 3, 3, 2, 2]
+const CATEGORY_NAMES := ["TIRADORES", "VERSÁTILES", "CONTROLADORES", "APOYO"]
+const CATEGORY_ICONS := ["⌖", "◆", "⌂", "+"]
+const CATEGORY_COLORS := [Color("ef6b6b"), Color("65b9d1"), Color("b68be5"), Color("68c99a")]
+
+static func category_id(kind: int) -> int:
+	return CATEGORY_IDS[clampi(kind, 0, CATEGORY_IDS.size() - 1)]
+
+static func category_name(kind: int) -> String:
+	return CATEGORY_NAMES[category_id(kind)]
+
+static func category_icon(kind: int) -> String:
+	return CATEGORY_ICONS[category_id(kind)]
+
+static func category_color(kind: int) -> Color:
+	return CATEGORY_COLORS[category_id(kind)]
 
 static func config(kind: int) -> Dictionary:
 	var configs := [

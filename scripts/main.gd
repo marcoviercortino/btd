@@ -120,6 +120,7 @@ var roulette_time := 0.0
 var roulette_tick := 0.0
 var roulette_rolls_left := 2
 var loadout_scroll_row := 0
+var hover_loadout_tower := -1
 var all_random_roulette_time := 0.0
 var all_random_roulette_tick := 0.0
 var all_random_reveal_time := 0.0
@@ -461,8 +462,9 @@ func update_balloons(delta: float) -> void:
 		for spike_index in range(spikes.size() - 1, -1, -1):
 			if point_on_path(balloons[i].distance).distance_to(spikes[spike_index].position) <= 18.0:
 				var spike_owner: int = int(spikes[spike_index].get("owner", -1))
+				var spike_damage: int = int(spikes[spike_index].get("damage", 1))
 				spikes.remove_at(spike_index)
-				damage_balloon(i, 1, "physical", spike_owner)
+				damage_balloon(i, spike_damage, "physical", spike_owner)
 				break
 		if i >= balloons.size():
 			continue
@@ -743,8 +745,9 @@ func drop_path_spikes(origin: Vector2, tower_range: float, owner_index: int) -> 
 		if origin.distance_to(drop_position) > tower_range or spike_density(drop_position) >= 50:
 			continue
 		var spike_count: int = int(towers[owner_index].get("spike_count", 4)) if owner_index >= 0 and owner_index < towers.size() else 4
+		var spike_damage: int = int(towers[owner_index].get("damage", 1)) if owner_index >= 0 and owner_index < towers.size() else 1
 		for _spike in range(spike_count):
-			spikes.append({"position": drop_position + Vector2(rng.randf_range(-8, 8), rng.randf_range(-8, 8)), "owner": owner_index})
+			spikes.append({"position": drop_position + Vector2(rng.randf_range(-8, 8), rng.randf_range(-8, 8)), "owner": owner_index, "damage": spike_damage})
 		return
 
 func spike_density(position: Vector2) -> int:
@@ -1307,7 +1310,7 @@ func place_tower_local(position: Vector2, tower_kind: int) -> void:
 	towers.append({
 		"position": position, "range": config.range,
 		"damage": config.damage, "damage_type": config.damage_type,
-		"reload": config.reload,
+		"reload": config.reload, "action_rate": 1.0 / (8.0 if tower_kind == 5 else config.reload) if (tower_kind == 5 or config.reload > 0.0) else 0.0,
 		"projectile_speed": config.projectile_speed,
 		"projectile_range": config.projectile_range, "thermal_vision": config.thermal_vision,
 		"cooldown": 0.0, "banana_timer": 0.0, "target_mode": 0, "primary_branch": -1, "secondary_branch": -1, "branch_levels": [0, 0, 0], "banana_value": 30, "banana_interval": 8.0, "heal_amount": 8, "chain_hits": 5, "explosion_radius": 68.0, "spike_count": 4, "damage_dealt": 0, "bloons_popped": 0, "effective_healing": 0, "banana_money_collected": 0, "color": TOWER_COLORS[tower_kind], "type": tower_kind, "cost": TOWER_COSTS[tower_kind]
@@ -1523,11 +1526,16 @@ func upgrade_inspected_tower(branch: int) -> void:
 	if int(tower.type) == 5 and previous_banana_interval > 0.0:
 		# Conserva el progreso proporcional del ciclo actual al acelerar la producción.
 		tower.banana_timer = clampf(float(tower.get("banana_timer", 0.0)) * float(tower.banana_interval) / previous_banana_interval, 0.0, float(tower.banana_interval))
+		tower.action_rate = 1.0 / float(tower.banana_interval)
 	tower.heal_amount = int(tower.get("heal_amount", 8)) + int(upgrade.get("heal", 0))
 	tower.spike_count = int(tower.get("spike_count", 4)) + int(upgrade.get("spike_count", 0))
-	if upgrade.has("reload_mult"):
+	if int(tower.type) != 5 and (upgrade.has("reload_mult") or upgrade.has("attack_rate_mult")):
 		var previous_reload: float = float(tower.reload)
-		tower.reload *= float(upgrade.reload_mult)
+		var previous_rate: float = float(tower.get("action_rate", 1.0 / previous_reload if previous_reload > 0.0 else 0.0))
+		var rate_multiplier: float = float(upgrade.get("attack_rate_mult", 1.0 / float(upgrade.get("reload_mult", 1.0))))
+		tower.action_rate = previous_rate * rate_multiplier
+		if float(tower.action_rate) > 0.0:
+			tower.reload = 1.0 / float(tower.action_rate)
 		# En la Médica, el ritmo es velocidad de casteo: el enfriamiento actual
 		# también se acorta proporcionalmente para que la mejora tenga efecto inmediato.
 		if int(tower.type) == 6 and previous_reload > 0.0:
@@ -1930,7 +1938,7 @@ func rpc_place_rival_tower(position: Vector2, tower_kind: int) -> void:
 	rival_towers.append({
 		"position": position, "range": config.range,
 		"damage": config.damage, "damage_type": config.damage_type,
-		"reload": config.reload,
+		"reload": config.reload, "action_rate": 1.0 / (8.0 if tower_kind == 5 else config.reload) if (tower_kind == 5 or config.reload > 0.0) else 0.0,
 		"projectile_speed": config.projectile_speed,
 		"projectile_range": config.projectile_range, "thermal_vision": config.thermal_vision,
 		"cooldown": 0.0, "banana_timer": 0.0, "target_mode": 0, "upgrade_level": 0, "banana_value": 30, "banana_interval": 8.0, "heal_amount": 8, "chain_hits": 5, "explosion_radius": 68.0, "spike_count": 4, "color": TOWER_COLORS[tower_kind], "type": tower_kind
@@ -2994,8 +3002,14 @@ func draw_sword_swipes(origin: Vector2, scale: Vector2, swipe_list := sword_swip
 func draw_spikes(spike_list: Array) -> void:
 	for spike in spike_list:
 		var point: Vector2 = spike.position
-		draw_colored_polygon(PackedVector2Array([point + Vector2(-7, 6), point + Vector2(0, -8), point + Vector2(7, 6)]), Color("dbe8ed"))
-		draw_polyline(PackedVector2Array([point + Vector2(-7, 6), point + Vector2(0, -8), point + Vector2(7, 6)]), Color("415260"), 2.0)
+		# Tres púas solapadas con base oscura y puntas claras, más legibles que un triángulo plano.
+		for offset in [Vector2(-6, 3), Vector2(6, 3), Vector2(0, 0)]:
+			var base_width := 5.0 if offset.x == 0.0 else 4.0
+			var height := 18.0 if offset.x == 0.0 else 14.0
+			var points := PackedVector2Array([point + offset + Vector2(-base_width, 7), point + offset + Vector2(0, -height), point + offset + Vector2(base_width, 7)])
+			draw_colored_polygon(points, Color("d9e6ec"))
+			draw_polyline(PackedVector2Array([points[0], points[1], points[2]]), Color("344b59"), 2.0)
+			draw_line(point + offset + Vector2(-base_width * 0.35, 4), point + offset + Vector2(0, -height + 3), Color("ffffff"), 1.25)
 
 func draw_spikes_at(origin: Vector2, spike_list: Array) -> void:
 	draw_set_transform(origin, 0.0, Vector2(0.75, 0.75))
@@ -3316,6 +3330,10 @@ func open_loadout_select(is_online: bool) -> void:
 	rival_ready = false
 
 func handle_loadout_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		hover_loadout_tower = loadout_tower_at(event.position)
+		queue_redraw()
+		return
 	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 		loadout_select = false
 		online_lobby = online_mode
@@ -3339,7 +3357,7 @@ func handle_loadout_input(event: InputEvent) -> void:
 		online_lobby = online_mode
 		return
 	for kind in range(TOWER_NAMES.size()):
-		if loadout_card_rect(kind).has_point(design_position):
+		if Rect2(40, 270, 1360, 535).has_point(design_position) and loadout_card_rect(kind).has_point(design_position):
 			if random_tower >= 0 or roulette_time > 0.0:
 				return
 			if kind in chosen_towers:
@@ -3489,17 +3507,20 @@ func draw_loadout_select() -> void:
 	draw_centered("ELIGE 3 TORRES + 1 ALEATORIA", Vector2(960, 170), 42, Color("72d2c8"))
 	draw_centered("%d / 3 seleccionadas · Ruleta: %d tiradas" % [chosen_towers.size(), roulette_rolls_left], Vector2(960, 225), 24, Color("d9eef4"))
 	var font := ThemeDB.fallback_font
+	draw_loadout_category_headers(font)
 	for kind in range(TOWER_NAMES.size()):
 		var rect := loadout_card_rect(kind)
 		if not Rect2(40, 270, 1360, 535).intersects(rect):
 			continue
 		var selected := kind in chosen_towers
 		draw_style_box(make_box(Color("31546c") if selected else Color("1d4055"), 16), rect)
+		draw_rect(Rect2(rect.position, Vector2(rect.size.x, 7)), TowerCatalogScript.category_color(kind))
 		draw_texture_rect(tower_texture_for(kind), Rect2(rect.position + Vector2(24, 30), Vector2(125, 125)), false)
 		draw_string(font, rect.position + Vector2(160, 75), TOWER_NAMES[kind], HORIZONTAL_ALIGNMENT_LEFT, 120, 20, Color.WHITE)
 		draw_string(font, rect.position + Vector2(160, 112), "$ %d" % TOWER_COSTS[kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("ffd76a"))
 		draw_string(font, rect.position + Vector2(24, 190), "Daño %d · Recarga %.2f s" % [tower_config(kind).damage, tower_config(kind).reload], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("d9eef4"))
 		draw_string(font, rect.position + Vector2(24, 220), "Alcance %d" % tower_config(kind).range, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("bdd1de"))
+		draw_tower_category_line(rect.position + Vector2(180, 220), kind, 12)
 	if loadout_max_scroll_row() > 0:
 		draw_style_box(make_box(Color("294a60"), 9), Rect2(1822, 430, 60, 116))
 		draw_centered("▲", Vector2(1852, 460), 20, Color.WHITE)
@@ -3517,13 +3538,61 @@ func draw_loadout_select() -> void:
 	draw_style_box(make_box(Color("294a60"), 10), Rect2(40, 950, 180, 62))
 	draw_string(font, Vector2(84, 990), "VOLVER", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color.WHITE)
 	draw_centered("Esc: volver", Vector2(960, 1030), 17, Color("bdd1de"))
+	draw_loadout_tower_tooltip()
 	if all_random_roulette_time > 0.0 or all_random_reveal_time > 0.0:
 		draw_all_random_roulette()
 
+func draw_loadout_category_headers(font: Font) -> void:
+	var names := ["TIRADORES", "VERSÁTILES", "CONTROLADORES", "APOYO"]
+	var icons := ["⌖", "◆", "⌂", "+"]
+	for category in range(4):
+		var rect := Rect2(45 + category * 345, 250, 310, 28)
+		var color: Color = TowerCatalogScript.CATEGORY_COLORS[category]
+		draw_style_box(make_box(color.darkened(0.55), 7), rect)
+		draw_string(font, rect.position + Vector2(14, 20), "%s  %s" % [icons[category], names[category]], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, color.lightened(0.25))
+		if category == 0:
+			draw_string(font, rect.position + Vector2(182, 20), "Próximamente", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("d8b7b7"))
+
+func draw_loadout_tower_tooltip() -> void:
+	if hover_loadout_tower < 0 or hover_loadout_tower >= TOWER_NAMES.size():
+		return
+	var rect := Rect2(1430, 55, 440, 215)
+	var descriptions := [
+		"Dardos fiables para responder a cualquier amenaza.",
+		"Una órbita perforante para golpear varias veces.",
+		"Bombas de área ideales contra grupos.",
+		"Rayos arcanos que saltan entre enemigos.",
+		"Flechas místicas perforantes de largo alcance.",
+		"Produce bananas para financiar tu defensa.",
+		"Recupera vidas y mantiene tu frente estable.",
+		"Un sable que barre globos a corta distancia.",
+		"Siembra púas permanentes a lo largo del camino."
+	]
+	var kind := hover_loadout_tower
+	draw_style_box(make_box(Color(0.06, 0.13, 0.19, 0.98), 12), rect)
+	draw_string(ThemeDB.fallback_font, rect.position + Vector2(18, 34), TOWER_NAMES[kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 23, TOWER_COLORS[kind])
+	draw_tower_category_line(rect.position + Vector2(18, 64), kind, 16)
+	draw_string(ThemeDB.fallback_font, rect.position + Vector2(18, 101), descriptions[kind], HORIZONTAL_ALIGNMENT_LEFT, 400, 16, Color("d9eef4"))
+	var config := tower_config(kind)
+	draw_string(ThemeDB.fallback_font, rect.position + Vector2(18, 143), "Coste $%d · Daño %d · Alcance %d" % [TOWER_COSTS[kind], config.damage, config.range], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("ffd76a"))
+	var action_text := "Recarga %.2f s" % config.reload if config.reload > 0.0 else "Generación especial"
+	draw_string(ThemeDB.fallback_font, rect.position + Vector2(18, 173), action_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("bdd1de"))
+	draw_string(ThemeDB.fallback_font, rect.position + Vector2(18, 201), "Visión térmica: %s" % ("SÍ" if config.thermal_vision else "NO"), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("f4d66d") if config.thermal_vision else Color("9ebfcf"))
+
 func loadout_card_rect(kind: int) -> Rect2:
-	var column: int = kind % 4
-	var row: int = kind / 4
+	var ordered_kinds := [0, 1, 2, 3, 4, 7, 8, 5, 6]
+	var display_index: int = ordered_kinds.find(kind)
+	var column: int = display_index % 4
+	var row: int = display_index / 4
 	return Rect2(45 + column * 345, 285 + (row - loadout_scroll_row) * 275, 310, 240)
+
+func loadout_tower_at(position: Vector2) -> int:
+	if not Rect2(40, 270, 1360, 535).has_point(position):
+		return -1
+	for kind in range(TOWER_NAMES.size()):
+		if loadout_card_rect(kind).has_point(position):
+			return kind
+	return -1
 
 func loadout_max_scroll_row() -> int:
 	var rows := int(ceili(float(TOWER_NAMES.size()) / 4.0))
@@ -3649,17 +3718,19 @@ func draw_inspected_tower_menu() -> void:
 	draw_texture_rect(tower_texture_for(kind), Rect2(Vector2(995, 790) + menu_offset, Vector2(88, 88)), false)
 	draw_string(font, panel.position + Vector2(125, 110), "Visión térmica: %s" % ("SÍ" if tower.get("thermal_vision", false) else "NO"), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("f4d66d") if tower.get("thermal_vision", false) else Color("9ebfcf"))
 	draw_string(font, Vector2(1100, 810) + menu_offset, TOWER_NAMES[kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 25, Color.WHITE)
+	draw_tower_category_line(Vector2(1100, 786) + menu_offset, kind, 15)
 	var primary_stat := "Daño %d" % tower.damage
 	if kind == 6:
 		primary_stat = "Curación %d" % int(tower.get("heal_amount", 8))
 	elif kind == 5:
 		primary_stat = "Banana $%d" % int(tower.get("banana_value", 30))
-	var timing_label := "Ataque"
-	var timing_value: float = float(tower.get("reload", 0.0))
-	if kind == 5:
+	var timing_label := "Velocidad de ataque"
+	if kind == 6:
+		timing_label = "Velocidad de casteo"
+	elif kind == 5 or kind == 8:
 		timing_label = "Generación"
-		timing_value = float(tower.get("banana_interval", 8.0))
-	draw_string(font, Vector2(1100, 842) + menu_offset, "%s · Alcance %d · %s %.2f s" % [primary_stat, tower.range, timing_label, timing_value], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("bdd1de"))
+	var timing_rate: float = float(tower.get("action_rate", 1.0 / float(tower.get("reload", 1.0)) if float(tower.get("reload", 0.0)) > 0.0 else 0.0))
+	draw_string(font, Vector2(1100, 842) + menu_offset, "%s · Alcance %d · %s %.2f/s" % [primary_stat, tower.range, timing_label, timing_rate], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("bdd1de"))
 	if kind != 5 and kind != 6 and kind != 8:
 		var target_modes := ["PRIMERO", "ÚLTIMO", "MÁS FUERTE", "MÁS DÉBIL"]
 		var target_mode: int = int(tower.get("target_mode", 0))
@@ -3712,16 +3783,23 @@ func draw_inspected_tower_menu() -> void:
 	draw_string(font, Vector2(1320, 1001) + menu_offset, "VENDER $%d" % refund, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
 	draw_string(font, Vector2(1470, 819) + menu_offset, "×", HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
 
+func draw_tower_category_line(position: Vector2, kind: int, size := 16) -> void:
+	var category_color: Color = TowerCatalogScript.category_color(kind)
+	draw_circle(position + Vector2(9, -6), 10, category_color.darkened(0.25))
+	draw_centered(TowerCatalogScript.category_icon(kind), position + Vector2(9, 0), size, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, position + Vector2(24, 0), TowerCatalogScript.category_name(kind), HORIZONTAL_ALIGNMENT_LEFT, -1, size, category_color)
+
 func draw_tower_tooltip() -> void:
 	if hover_tower < 0:
 		return
-	var rect := Rect2(1610, 550, 290, 180) if solo_modern_mode else Rect2(970, 850, 480, 180)
+	var rect := Rect2(1610, 550, 290, 210) if solo_modern_mode else Rect2(970, 820, 480, 210)
 	draw_style_box(make_box(Color(0.07, 0.14, 0.20, 0.96), 12), rect)
 	var font := ThemeDB.fallback_font
 	var config := tower_config(hover_tower)
 	var damage: int = config.damage
 	var attack_speed := "%.2f s" % config.reload
 	var range_value := "%d" % config.range
+	draw_tower_category_line(rect.position + Vector2(20, 189), hover_tower, 16)
 	draw_string(font, rect.position + Vector2(20, 34), TOWER_NAMES[hover_tower], HORIZONTAL_ALIGNMENT_LEFT, -1, 24, TOWER_COLORS[hover_tower])
 	draw_string(font, rect.position + Vector2(20, 67), "Coste: $ %d   ·   Daño: %d" % [TOWER_COSTS[hover_tower], damage], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
 	draw_string(font, rect.position + Vector2(20, 96), "Velocidad de ataque: %s" % attack_speed, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
