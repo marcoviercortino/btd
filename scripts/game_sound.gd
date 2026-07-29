@@ -364,3 +364,71 @@ func play_loadout_complete_effect() -> void:
 		var sample := (sin(TAU * note * time) + sin(TAU * note * 2.0 * time) * 0.15) * envelope * 0.30
 		playback.push_frame(Vector2(sample, sample))
 	get_tree().create_timer(duration + 0.08).timeout.connect(player.queue_free)
+
+func play_pirate_sword_sweep() -> void:
+	# Un silbido de aire con un toque metÃ¡lico para el barrido amplio del pirata.
+	var player := AudioStreamPlayer.new()
+	var stream := AudioStreamGenerator.new()
+	stream.mix_rate = 22050.0
+	stream.buffer_length = 0.32
+	player.stream = stream
+	player.volume_db = -6.0 + effects_volume_offset()
+	add_child(player)
+	player.play()
+	var playback := player.get_stream_playback()
+	var duration := 0.24
+	for frame in range(int(duration * stream.mix_rate)):
+		var time := float(frame) / stream.mix_rate
+		var progress := time / duration
+		var sweep_frequency := lerpf(280.0, 1520.0, progress)
+		var envelope := sin(PI * progress) * exp(-progress * 0.55)
+		var whoosh := sin(TAU * sweep_frequency * time) * envelope
+		var steel := sin(TAU * 2350.0 * time) * exp(-time * 24.0) * 0.16
+		playback.push_frame(Vector2((whoosh * 0.24 + steel) * 0.80, (whoosh * 0.24 + steel) * 0.80))
+	get_tree().create_timer(duration + 0.06).timeout.connect(player.queue_free)
+
+func play_wave_start_effect() -> void:
+	# Llamada ascendente tipo trompeta corta para anunciar una nueva oleada.
+	var player := AudioStreamPlayer.new()
+	var stream := AudioStreamGenerator.new()
+	stream.mix_rate = 22050.0
+	stream.buffer_length = 0.58
+	player.stream = stream
+	player.volume_db = -4.5 + effects_volume_offset()
+	add_child(player)
+	player.play()
+	var playback := player.get_stream_playback()
+	var duration := 0.42
+	var notes := [392.0, 523.25, 659.25]
+	for frame in range(int(duration * stream.mix_rate)):
+		var time := float(frame) / stream.mix_rate
+		var note_index := mini(2, int(time / 0.12))
+		var local_time := fposmod(time, 0.12)
+		var envelope := exp(-local_time * 10.0)
+		var note: float = notes[note_index]
+		var brass := sin(TAU * note * time) + sin(TAU * note * 2.0 * time) * 0.20 + sin(TAU * note * 3.0 * time) * 0.08
+		playback.push_frame(Vector2(brass * envelope * 0.19, brass * envelope * 0.19))
+	get_tree().create_timer(duration + 0.08).timeout.connect(player.queue_free)
+
+func play_vs_intro_effect() -> void:
+	# Descarga grave con chispas agudas para crear tensiÃ³n antes del duelo.
+	var player := AudioStreamPlayer.new()
+	var stream := AudioStreamGenerator.new()
+	stream.mix_rate = 22050.0
+	stream.buffer_length = 0.9
+	player.stream = stream
+	player.volume_db = -4.0 + effects_volume_offset()
+	add_child(player)
+	player.play()
+	var playback := player.get_stream_playback()
+	var duration := 0.72
+	for frame in range(int(duration * stream.mix_rate)):
+		var time := float(frame) / stream.mix_rate
+		var envelope := exp(-time * 3.4)
+		var rumble := sin(TAU * lerpf(82.0, 45.0, time / duration) * time) * 0.34
+		var crackle_gate := sin(TAU * 17.0 * time) > 0.68
+		var crackle := (sin(TAU * 1850.0 * time) + sin(TAU * 2630.0 * time) * 0.45) * 0.18 if crackle_gate else 0.0
+		var strike := sin(TAU * 510.0 * time) * exp(-time * 13.0) * 0.35
+		var sample := (rumble + crackle + strike) * envelope
+		playback.push_frame(Vector2(sample, sample))
+	get_tree().create_timer(duration + 0.08).timeout.connect(player.queue_free)

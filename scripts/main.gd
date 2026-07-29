@@ -28,6 +28,7 @@ const PIRATE_TEXTURE = preload("res://assets/characters/pirate.svg")
 const PATHCUTTER_TEXTURE = preload("res://assets/characters/pathcutter.svg")
 const BOOMERANG_PROJECTILE_TEXTURE = preload("res://assets/projectiles/boomerang.svg")
 const BOMB_PROJECTILE_TEXTURE = preload("res://assets/projectiles/black_bomb.svg")
+const PROFILE_DEFAULT_TEXTURE = preload("res://assets/characters/profile_default.svg")
 const MOAB_TEXTURE = preload("res://assets/balloons/moab_happy.svg")
 const MOAB_DAMAGED_TEXTURE = preload("res://assets/balloons/moab_damaged.svg")
 const MOAB_BROKEN_TEXTURE = preload("res://assets/balloons/moab_broken.svg")
@@ -63,6 +64,7 @@ var spawn_left := 0
 var spawn_timer := 0.0
 var spawn_delay := 0.58
 var wave_banner := 0.0
+var match_elapsed := 0.0
 var game_over := false
 var won := false
 var rng := RandomNumberGenerator.new()
@@ -74,6 +76,18 @@ var online_lobby := false
 var menu_music_select := false
 var sound_menu_open := false
 var sound_slider_drag := ""
+var profile_menu_open := false
+var profile_picker_open := false
+var profile_name := "Jugador"
+var profile_avatar := -1
+var pending_profile_name := "Jugador"
+var pending_profile_avatar := -1
+var profile_avatar_hovered := false
+var profile_status := ""
+var rival_profile_name := ""
+var rival_profile_avatar := -1
+var vs_intro_time := 0.0
+var vs_intro_spin := 0.0
 var active_player := 1
 var network_peer: ENetMultiplayerPeer
 var lobby_ip := "127.0.0.1"
@@ -177,6 +191,8 @@ func _ready() -> void:
 		game_sound.set_menu_track(int(settings.get_value("audio", "menu_track", game_sound.menu_track)))
 		game_sound.set_music_volume(int(settings.get_value("audio", "music_volume", 100)))
 		game_sound.set_effects_volume(int(settings.get_value("audio", "effects_volume", 100)))
+		profile_name = str(settings.get_value("profile", "name", profile_name)).left(12)
+		profile_avatar = clampi(int(settings.get_value("profile", "avatar", profile_avatar)), -1, 8)
 	game_sound.set_music("menu")
 	rng.randomize()
 	for i in range(path.size() - 1):
@@ -189,6 +205,14 @@ func _process(delta: float) -> void:
 		money_popup_time -= delta
 	if send_cooldown > 0.0:
 		send_cooldown = maxf(0.0, send_cooldown - delta)
+	if vs_intro_time > 0.0:
+		game_sound.set_music("menu")
+		vs_intro_time -= delta
+		vs_intro_spin += delta
+		if vs_intro_time <= 0.0:
+			open_map_select(true)
+		queue_redraw()
+		return
 	if map_select:
 		game_sound.set_music("menu")
 		update_map_selection(delta)
@@ -211,6 +235,7 @@ func _process(delta: float) -> void:
 		return
 	game_sound.set_music("game")
 	var gameplay_delta := 0.0 if debug_paused else delta * gameplay_speed
+	match_elapsed += gameplay_delta
 	update_wave(gameplay_delta)
 	update_online_wave_sync(gameplay_delta)
 	update_solo_auto_wave(gameplay_delta)
@@ -277,6 +302,8 @@ func start_wave_local() -> void:
 	spawn_delay = max(0.18, 0.63 - wave * 0.025)
 	spawn_timer = 0.15
 	wave_banner = 1.8
+	if game_sound:
+		game_sound.play_wave_start_effect()
 
 func update_online_wave_sync(delta: float) -> void:
 	if not online_mode or not multiplayer.is_server() or online_wave_start_timer < 0.0:
@@ -682,6 +709,8 @@ func cast_pirate_sweep(origin: Vector2, target_position: Vector2, owner_index: i
 		if offset.length() <= 90.0 and facing.dot(offset.normalized()) >= 0.0:
 			damage_balloon(index, 2, "physical", owner_index)
 	sword_swipes.append({"position": origin, "angle": facing.angle(), "time": 0.32})
+	if game_sound:
+		game_sound.play_pirate_sword_sweep()
 
 func drop_path_spikes(origin: Vector2, tower_range: float, owner_index: int) -> void:
 	for _attempt in range(24):
@@ -964,6 +993,11 @@ func _input(event: InputEvent) -> void:
 			queue_redraw()
 			return
 	if not mode_selected:
+		if vs_intro_time > 0.0:
+			return
+		if profile_menu_open:
+			handle_profile_input(event)
+			return
 		if sound_menu_open:
 			handle_sound_menu_input(event)
 			return
@@ -981,7 +1015,9 @@ func _input(event: InputEvent) -> void:
 			return
 		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 			var menu_position: Vector2 = event.position / 1.5
-			if Rect2(250, 330, 230, 190).has_point(menu_position):
+			if profile_button_rect().has_point(menu_position):
+				open_profile_menu()
+			elif Rect2(250, 330, 230, 190).has_point(menu_position):
 				solo_modern_mode = true
 				multiplayer_mode = false
 				open_map_select(false)
@@ -1853,6 +1889,14 @@ func too_close_to_path(position: Vector2) -> bool:
 
 func _draw() -> void:
 	if not mode_selected:
+		if vs_intro_time > 0.0:
+			draw_vs_intro()
+			return
+		if profile_menu_open:
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2(1.5, 1.5))
+			draw_profile_menu()
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			return
 		if sound_menu_open:
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2(1.5, 1.5))
 			draw_sound_menu()
@@ -2087,6 +2131,7 @@ func draw_mode_select() -> void:
 		draw_circle(Vector2(80 + i * 128, 100 + (i % 3) * 210), 90, Color("173c54"))
 	draw_centered("BALLOON FRONTIER", Vector2(640, 145), 46, Color("72d2c8"))
 	draw_centered("ELIGE TU MODO DE JUEGO", Vector2(640, 205), 20, Color("d9eef4"))
+	draw_profile_button()
 	draw_mode_card(Rect2(250, 330, 230, 190), Color("398cc0"), "INDIVIDUAL", "Defiende Coral Bend\na tu propio ritmo", "1 jugador")
 	draw_mode_card(Rect2(525, 330, 230, 190), Color("b967a0"), "CO-OP LOCAL", "Cooperativo local:\nalterna turnos", "2 jugadores")
 	draw_mode_card(Rect2(800, 330, 230, 190), Color("ef884e"), "EN LINEA 1 VS 1", "Crea una sala o\nunete a tu rival", "2 jugadores")
@@ -2095,6 +2140,166 @@ func draw_mode_select() -> void:
 	draw_centered("MÚSICA DEL MENÚ", Vector2(510, 683), 17, Color.WHITE)
 	draw_style_box(make_box(Color("7859a0"), 10), Rect2(650, 650, 240, 52))
 	draw_centered("SONIDO", Vector2(770, 683), 17, Color.WHITE)
+
+func profile_button_rect() -> Rect2:
+	return Rect2(990, 24, 255, 66)
+
+func profile_avatar_texture(avatar: int):
+	var portraits := [DART_RANGER_TEXTURE, BOOMERANG_SCOUT_TEXTURE, BOMBARDIER_TEXTURE, LIGHTNING_MAGE_TEXTURE, MYSTIC_ARCHER_TEXTURE, BANANA_FARMER_TEXTURE, REEF_MEDIC_TEXTURE, PIRATE_TEXTURE, PATHCUTTER_TEXTURE]
+	return PROFILE_DEFAULT_TEXTURE if avatar < 0 or avatar >= portraits.size() else portraits[avatar]
+
+func draw_profile_button() -> void:
+	var rect := profile_button_rect()
+	draw_style_box(make_box(Color("23485e"), 13), rect)
+	draw_circle(rect.position + Vector2(35, 33), 26, Color("72d2c8"))
+	draw_texture_rect(profile_avatar_texture(profile_avatar), Rect2(rect.position + Vector2(10, 8), Vector2(50, 50)), false)
+	draw_string(ThemeDB.fallback_font, rect.position + Vector2(74, 39), profile_name, HORIZONTAL_ALIGNMENT_LEFT, 155, 21, Color.WHITE)
+
+func draw_vs_intro() -> void:
+	draw_rect(Rect2(0, 0, WIDTH, HEIGHT), Color("102536"))
+	for index in range(15):
+		var pulse := 0.12 + 0.07 * sin(vs_intro_spin * 4.0 + index)
+		draw_circle(Vector2(80 + index * 132, 110 + (index % 4) * 250), 86, Color(0.12, 0.34, 0.48, pulse))
+	draw_centered("ENFRENTAMIENTO", Vector2(960, 115), 38, Color("f4d66d"))
+	draw_vs_profile(Vector2(385, 505), profile_name, profile_avatar, "ANFITRIÓN" if multiplayer.is_server() else "JUGADOR UNIDO", Color("72d2c8"))
+	draw_vs_profile(Vector2(1535, 505), rival_profile_name if not rival_profile_name.is_empty() else "Rival", rival_profile_avatar, "JUGADOR UNIDO" if multiplayer.is_server() else "ANFITRIÓN", Color("ffaaa0"))
+	var center := Vector2(960, 505)
+	var spark := 0.55 + 0.35 * sin(vs_intro_spin * 13.0)
+	draw_circle(center, 142, Color(0.15, 0.25, 0.44, 0.88))
+	for arc_index in range(5):
+		var start := vs_intro_spin * (3.2 + arc_index * 0.27) + arc_index * TAU / 5.0
+		var radius := 154.0 + sin(vs_intro_spin * 8.0 + arc_index) * 12.0
+		draw_arc(center, radius, start, start + 0.85, 14, Color(0.42, 0.86, 1.0, spark), 4.0)
+		draw_arc(center, radius - 11.0, start + 0.18, start + 0.55, 10, Color(0.92, 0.96, 1.0, spark), 2.0)
+	draw_centered("VS", center + Vector2(0, 27), 74, Color.WHITE)
+	draw_centered("PREPARANDO EL DUELO...", Vector2(960, 835), 22, Color("d9eef4"))
+
+func draw_vs_profile(center: Vector2, display_name: String, avatar: int, role: String, accent: Color) -> void:
+	var card := Rect2(center - Vector2(245, 230), Vector2(490, 460))
+	draw_style_box(make_box(Color("173c54"), 18), card)
+	draw_rect(Rect2(card.position, Vector2(card.size.x, 9)), accent)
+	draw_circle(center + Vector2(0, -48), 122, accent.darkened(0.55))
+	draw_texture_rect(profile_avatar_texture(avatar), Rect2(center + Vector2(-105, -153), Vector2(210, 210)), false)
+	draw_centered(display_name, center + Vector2(0, 118), 31, Color.WHITE)
+	draw_centered(role, center + Vector2(0, 163), 19, accent)
+
+func profile_avatar_rect() -> Rect2:
+	return Rect2(245, 285, 205, 205)
+
+func draw_profile_menu() -> void:
+	var font := ThemeDB.fallback_font
+	draw_rect(Rect2(0, 0, WIDTH, HEIGHT), Color("102536"))
+	if profile_picker_open:
+		draw_profile_picker(font)
+		return
+	draw_centered("PERSONALIZA TU PERFIL", Vector2(640, 115), 40, Color("72d2c8"))
+	draw_style_box(make_box(Color("173c54"), 16), Rect2(145, 185, 990, 430))
+	var avatar_rect := profile_avatar_rect()
+	draw_circle(avatar_rect.get_center(), 108, Color("31546c"))
+	draw_texture_rect(profile_avatar_texture(pending_profile_avatar), avatar_rect, false)
+	if profile_avatar_hovered:
+		draw_rect(avatar_rect, Color(0.10, 0.10, 0.13, 0.42))
+		draw_centered("PINCEL", avatar_rect.get_center() + Vector2(0, 9), 20, Color.WHITE)
+	draw_string(font, Vector2(510, 295), "NOMBRE", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("bdd1de"))
+	draw_style_box(make_box(Color("31546c") if editing_field == "profile_name" else Color("294a60"), 9), Rect2(510, 315, 455, 62))
+	draw_string(font, Vector2(532, 355), pending_profile_name + ("|" if editing_field == "profile_name" else ""), HORIZONTAL_ALIGNMENT_LEFT, 410, 25, Color.WHITE)
+	draw_string(font, Vector2(510, 415), "Máximo 12 caracteres", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("bdd1de"))
+	if not profile_status.is_empty():
+		draw_string(font, Vector2(510, 455), profile_status, HORIZONTAL_ALIGNMENT_LEFT, 455, 16, Color("f4d66d"))
+	draw_style_box(make_box(Color("4b9b78"), 11), Rect2(510, 505, 280, 64))
+	draw_centered("⟳  ACTUALIZAR", Vector2(650, 545), 20, Color.WHITE)
+	draw_style_box(make_box(Color("294a60"), 9), Rect2(820, 505, 145, 64))
+	draw_centered("VOLVER", Vector2(892, 545), 18, Color.WHITE)
+
+func draw_profile_picker(font: Font) -> void:
+	draw_centered("ELIGE TU IMAGEN DE PERFIL", Vector2(640, 100), 38, Color("72d2c8"))
+	draw_style_box(make_box(Color("173c54"), 16), Rect2(100, 155, 1080, 490))
+	draw_texture_rect(profile_avatar_texture(pending_profile_avatar), Rect2(155, 245, 245, 245), false)
+	draw_string(font, Vector2(155, 535), "VISTA PREVIA", HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color("f4d66d"))
+	for index in range(10):
+		var avatar := index - 1
+		var rect := Rect2(470 + (index % 5) * 125, 220 + (index / 5) * 190, 105, 145)
+		draw_style_box(make_box(Color("4b7d9e") if avatar == pending_profile_avatar else Color("294a60"), 10), rect)
+		draw_texture_rect(profile_avatar_texture(avatar), Rect2(rect.position + Vector2(12, 10), Vector2(81, 81)), false)
+		draw_centered("DEFECTO" if avatar < 0 else TOWER_NAMES[avatar], Vector2(rect.get_center().x, rect.position.y + 120), 12, Color.WHITE)
+	draw_style_box(make_box(Color("294a60"), 9), Rect2(540, 670, 200, 48))
+	draw_centered("VOLVER", Vector2(640, 701), 17, Color.WHITE)
+
+func open_profile_menu() -> void:
+	pending_profile_name = profile_name
+	pending_profile_avatar = profile_avatar
+	profile_status = ""
+	profile_menu_open = true
+	profile_picker_open = false
+	editing_field = ""
+
+func apply_profile_changes() -> void:
+	var candidate := pending_profile_name.strip_edges().left(12)
+	if candidate.is_empty():
+		profile_status = "Escribe un nombre para el perfil."
+		return
+	profile_name = candidate
+	profile_avatar = pending_profile_avatar
+	var settings := ConfigFile.new()
+	settings.load("user://balloon_frontier.cfg")
+	settings.set_value("profile", "name", profile_name)
+	settings.set_value("profile", "avatar", profile_avatar)
+	settings.save("user://balloon_frontier.cfg")
+	profile_status = "Perfil actualizado."
+	editing_field = ""
+
+func handle_profile_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		if profile_picker_open:
+			profile_picker_open = false
+		else:
+			profile_menu_open = false
+		editing_field = ""
+		return
+	if not profile_picker_open and event is InputEventKey and event.pressed and editing_field == "profile_name":
+		if event.keycode == KEY_BACKSPACE:
+			pending_profile_name = pending_profile_name.left(-1)
+		elif event.ctrl_pressed and event.keycode == KEY_V:
+			for character in DisplayServer.clipboard_get():
+				if pending_profile_name.length() < 12 and character != "\n" and character != "\r":
+					pending_profile_name += character
+		elif event.keycode == KEY_ENTER:
+			apply_profile_changes()
+		elif event.unicode > 0 and pending_profile_name.length() < 12:
+			pending_profile_name += char(event.unicode)
+		queue_redraw()
+		return
+	if event is InputEventMouseMotion:
+		var hover_position: Vector2 = event.position / 1.5
+		profile_avatar_hovered = not profile_picker_open and profile_avatar_rect().has_point(hover_position)
+		queue_redraw()
+		return
+	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
+		return
+	var mouse: Vector2 = event.position / 1.5
+	if profile_picker_open:
+		for index in range(10):
+			var avatar := index - 1
+			if Rect2(470 + (index % 5) * 125, 220 + (index / 5) * 190, 105, 145).has_point(mouse):
+				pending_profile_avatar = avatar
+				profile_picker_open = false
+				return
+		if Rect2(540, 670, 200, 48).has_point(mouse):
+			profile_picker_open = false
+		return
+	if profile_avatar_rect().has_point(mouse):
+		profile_picker_open = true
+		profile_avatar_hovered = false
+		return
+	if Rect2(510, 315, 455, 62).has_point(mouse):
+		editing_field = "profile_name"
+		return
+	if Rect2(510, 505, 280, 64).has_point(mouse):
+		apply_profile_changes()
+		return
+	if Rect2(820, 505, 145, 64).has_point(mouse):
+		profile_menu_open = false
+		editing_field = ""
 
 func draw_sound_slider(label: String, percent: int, position: Vector2, accent: Color) -> void:
 	var font := ThemeDB.fallback_font
@@ -2282,21 +2487,31 @@ func join_online_room() -> void:
 	multiplayer.connection_failed.connect(_on_online_connection_failed)
 	lobby_status = "Conectando con %s:%d..." % [lobby_ip, port_value]
 
-func _on_online_peer_connected(_peer_id: int) -> void:
+func _on_online_peer_connected(peer_id: int) -> void:
+	rpc_receive_rival_profile.rpc_id(peer_id, profile_name, profile_avatar)
 	launch_online_match()
 
 func _on_online_connected() -> void:
+	rpc_receive_rival_profile.rpc_id(1, profile_name, profile_avatar)
 	launch_online_match()
 
 func _on_online_connection_failed() -> void:
 	lobby_status = "No se pudo conectar. Revisa IP, puerto y firewall."
+
+@rpc("any_peer", "reliable")
+func rpc_receive_rival_profile(remote_name: String, remote_avatar: int) -> void:
+	rival_profile_name = remote_name.left(12)
+	rival_profile_avatar = clampi(remote_avatar, -1, 8)
 
 func launch_online_match() -> void:
 	online_lobby = false
 	online_mode = true
 	multiplayer_mode = false
 	editing_field = ""
-	open_map_select(true)
+	vs_intro_time = 3.0
+	vs_intro_spin = 0.0
+	if game_sound:
+		game_sound.play_vs_intro_effect()
 
 func draw_online_lobby() -> void:
 	draw_rect(Rect2(0, 0, WIDTH, HEIGHT), Color("102536"))
@@ -2325,9 +2540,9 @@ func draw_duel_status() -> void:
 	draw_style_box(make_box(Color("1b5268"), 10), Rect2(286, 18, 260, 88))
 	draw_style_box(make_box(Color("6a3545"), 10), Rect2(570, 18, 260, 88))
 	draw_string(font, Vector2(305, 48), "TU FRENTE", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("8ce1f1"))
-	draw_string(font, Vector2(305, 80), "♥ %d   $ %d   OLEADA %d" % [lives, money, wave], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
+	draw_string(font, Vector2(305, 80), "♥ %d   $ %d" % [lives, money], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
 	draw_string(font, Vector2(589, 48), "FRENTE RIVAL", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("ffb0a8"))
-	draw_string(font, Vector2(589, 80), "♥ %d   $ %d   OLEADA %d" % [rival_lives, rival_money, rival_wave], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
+	draw_string(font, Vector2(589, 80), "♥ %d   $ %d" % [rival_lives, rival_money], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
 
 func draw_solo_modern() -> void:
 	draw_rect(Rect2(0, 0, WIDTH, HEIGHT), Color("102536"))
@@ -2343,10 +2558,12 @@ func draw_solo_modern() -> void:
 	var font := ThemeDB.fallback_font
 	draw_style_box(make_box(Color(0.05, 0.18, 0.25, 0.92), 12), Rect2(30, 34, 690, 120))
 	draw_string(font, Vector2(60, 82), "DEFENSA INDIVIDUAL", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color("8ce1f1"))
-	draw_string(font, Vector2(60, 126), "VIDAS %d  ·  $ %d  ·  OLEADA %d" % [lives, money, wave], HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
+	draw_string(font, Vector2(60, 126), "VIDAS %d  ·  $ %d" % [lives, money], HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
+	draw_match_profile_badge(Rect2(620, 48, 72, 72), profile_name, profile_avatar, Color("72d2c8"), true)
 	draw_rect(Rect2(60, 178, 610, 18), Color("263544"))
 	draw_rect(Rect2(60, 178, 610.0 * lives / 150.0, 18), Color("65d98a"))
 	draw_string(font, Vector2(60, 233), "BENEFICIOS +$%d / 5 s" % beneficios, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("8ce1f1"))
+	draw_match_timer()
 	draw_style_box(make_box(Color("8a5db6"), 9), debug_button_rect())
 	draw_centered("DEBUG", debug_button_rect().get_center() + Vector2(0, 6), 17, Color.WHITE)
 	draw_speed_selector(Vector2(1740, 215), 120.0, 38.0)
@@ -2396,7 +2613,8 @@ func draw_online_duel() -> void:
 	draw_style_box(make_box(Color(0.30, 0.10, 0.16, 0.92), 12), Rect2(1200, 34, 690, 120))
 	var font := ThemeDB.fallback_font
 	draw_string(font, Vector2(60, 82), "TU FRENTE", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color("8ce1f1"))
-	draw_string(font, Vector2(60, 126), "VIDAS %d  ·  $ %d  ·  OLEADA %d" % [lives, money, wave], HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
+	draw_string(font, Vector2(60, 126), "VIDAS %d  ·  $ %d" % [lives, money], HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
+	draw_match_profile_badge(Rect2(620, 48, 72, 72), profile_name, profile_avatar, Color("72d2c8"), true)
 	draw_rect(Rect2(60, 178, 610, 18), Color("263544"))
 	draw_rect(Rect2(60, 178, 610.0 * lives / 150.0, 18), Color("65d98a"))
 	draw_string(font, Vector2(60, 233), "BENEFICIOS +$%d / 5 s" % beneficios, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("8ce1f1"))
@@ -2410,9 +2628,11 @@ func draw_online_duel() -> void:
 		var popup_x := money_x + (font.get_string_size(money_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 28).x - font.get_string_size(popup_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 23).x) * 0.5
 		draw_string(font, Vector2(popup_x, popup_y), popup_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 23, Color(1.0, 0.32, 0.32, popup_alpha))
 	draw_string(font, Vector2(1230, 82), "FRENTE RIVAL", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color("ffb0a8"))
-	draw_string(font, Vector2(1230, 126), "VIDAS %d  ·  OLEADA %d" % [rival_lives, rival_wave], HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
+	draw_string(font, Vector2(1230, 126), "VIDAS %d" % rival_lives, HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
+	draw_match_profile_badge(Rect2(1798, 48, 72, 72), rival_profile_name if not rival_profile_name.is_empty() else "Rival", rival_profile_avatar, Color("ffaaa0"), true)
 	draw_rect(Rect2(1230, 178, 610, 18), Color("263544"))
 	draw_rect(Rect2(1230, 178, 610.0 * rival_lives / 150.0, 18), Color("ef7676"))
+	draw_match_timer()
 	draw_style_box(make_box(Color("8a5db6"), 9), Rect2(1600, 215, 120, 38))
 	draw_centered("DEBUG", Vector2(1660, 242), 17, Color.WHITE)
 	draw_speed_selector(Vector2(1740, 215), 120.0, 38.0)
@@ -2961,8 +3181,12 @@ func draw_map_coin_toss() -> void:
 	var landing := map_coin_time < 0.55
 	var face_is_heads := map_coin_heads if landing else sin(map_coin_spin * 19.0) >= 0.0
 	var width_scale := 1.0 if landing else maxf(0.14, absf(cos(map_coin_spin * 19.0)))
+	var local_vote := map_coin_host_vote if multiplayer.is_server() else map_coin_join_vote
+	var rival_vote := map_coin_join_vote if multiplayer.is_server() else map_coin_host_vote
 	draw_centered("LANZAMIENTO DE MONEDA", Vector2(960, 150), 42, Color("f4d66d"))
 	draw_centered("Cara: mapa del anfitrión · Cruz: mapa del jugador unido", Vector2(960, 205), 20, Color("d9eef4"))
+	draw_map_coin_vote_card(Rect2(70, 315, 570, 330), local_vote, "TU MAPA", Color("72d2c8"))
+	draw_map_coin_vote_card(Rect2(1280, 315, 570, 330), rival_vote, "MAPA RIVAL", Color("ffaaa0"))
 	draw_set_transform(Vector2(960, 470), 0.0, Vector2(width_scale, 1.0))
 	draw_circle(Vector2.ZERO, 145.0, Color("f4c75d"))
 	draw_circle(Vector2.ZERO, 128.0, Color("d99235"))
@@ -2984,6 +3208,14 @@ func draw_map_coin_toss() -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	if landing:
 		draw_centered("%s · %s" % ["CARA" if map_coin_heads else "CRUZ", MapCatalogScript.NAMES[map_coin_host_vote if map_coin_heads else map_coin_join_vote]], Vector2(960, 720), 28, Color.WHITE)
+
+func draw_map_coin_vote_card(rect: Rect2, map_index: int, label: String, accent: Color) -> void:
+	var safe_index := clampi(map_index, 0, MapCatalogScript.NAMES.size() - 1)
+	draw_style_box(make_box(Color("18354a"), 14), rect)
+	draw_rect(Rect2(rect.position, Vector2(rect.size.x, 8)), accent)
+	draw_centered(label, Vector2(rect.get_center().x, rect.position.y + 37), 20, accent)
+	draw_texture_rect(MapCatalogScript.TEXTURES[safe_index], Rect2(rect.position + Vector2(22, 58), Vector2(rect.size.x - 44, 205)), false)
+	draw_centered(MapCatalogScript.NAMES[safe_index], Vector2(rect.get_center().x, rect.end.y - 30), 24, Color.WHITE)
 
 func draw_map_roulette() -> void:
 	var landing := map_roulette_time < 0.55
@@ -3163,6 +3395,7 @@ func rpc_start_online_match() -> void:
 func start_match_after_loadout() -> void:
 	loadout_select = false
 	mode_selected = true
+	match_elapsed = 0.0
 	local_wave_finished = false
 	rival_wave_finished = false
 	if online_mode and multiplayer.is_server():
@@ -3170,6 +3403,24 @@ func start_match_after_loadout() -> void:
 	elif not multiplayer_mode:
 		auto_wave_timer = 7.0
 	queue_redraw()
+
+func draw_match_timer() -> void:
+	var total_seconds := maxi(0, int(floor(match_elapsed)))
+	var minutes := total_seconds / 60
+	var seconds := total_seconds % 60
+	var timer_text := "%02d:%02d" % [minutes, seconds]
+	var rect := Rect2(820, 34, 280, 70)
+	draw_style_box(make_box(Color(0.06, 0.12, 0.20, 0.94), 12), rect)
+	draw_centered(timer_text, rect.get_center() + Vector2(0, 12), 34, Color("f4d66d"))
+	var wave_rect := Rect2(850, 112, 220, 38)
+	draw_style_box(make_box(Color(0.12, 0.25, 0.34, 0.94), 9), wave_rect)
+	draw_centered("OLEADA %d" % wave, wave_rect.get_center() + Vector2(0, 6), 18, Color.WHITE)
+
+func draw_match_profile_badge(rect: Rect2, display_name: String, avatar: int, accent: Color, name_on_left: bool) -> void:
+	draw_circle(rect.get_center(), 39, accent.darkened(0.45))
+	draw_texture_rect(profile_avatar_texture(avatar), rect, false)
+	var name_rect := Rect2(rect.position.x - 170, rect.position.y + 20, 155, 30) if name_on_left else Rect2(rect.end.x + 15, rect.position.y + 20, 155, 30)
+	draw_string(ThemeDB.fallback_font, name_rect.position, display_name, HORIZONTAL_ALIGNMENT_RIGHT if name_on_left else HORIZONTAL_ALIGNMENT_LEFT, name_rect.size.x, 20, accent)
 
 func draw_loadout_select() -> void:
 	draw_rect(Rect2(0, 0, WIDTH, HEIGHT), Color("102536"))

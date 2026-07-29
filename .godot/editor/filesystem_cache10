@@ -15,7 +15,7 @@ win.wav::AudioStreamWAV::7009733460974715173::1785236042::1785236131::1::::<><><
 moab_broken.svg::CompressedTexture2D::661703403811376103::1785250922::1785250934::1::::<><><>0<>0<>07132818e1a0209862bb4db8d2f4e645<>res://.godot/imported/moab_broken.svg-a644219bbcccc0efec20d5138f3aecac.ctex::
 moab_damaged.svg::CompressedTexture2D::7372904086591822416::1785250921::1785250934::1::::<><><>0<>0<>fa5be04a18d7702c90a26fe645aff407<>res://.godot/imported/moab_damaged.svg-11d7b94189b1dd410059089d5f1b3cab.ctex::
 moab_happy.svg::CompressedTexture2D::1729199425668908384::1785250301::1785250350::1::::<><><>0<>0<>29ff2022dbab0dbd7da6e1b4a2cc150b<>res://.godot/imported/moab_happy.svg-21c1f8d39d446b976fc7f6a2adfa00e0.ctex::
-::res://assets/characters/::1785248571
+::res://assets/characters/::1785329998
 banana_farmer.svg::CompressedTexture2D::7994041028861437499::1785236215::1785236245::1::::<><><>0<>0<>d1a991411e3436ba16aeb48b12b537e9<>res://.godot/imported/banana_farmer.svg-e5813e743d9d0e67a1dfd78c0a469962.ctex::
 bombardier.png::CompressedTexture2D::4231679078167601598::1785200752::1785201004::1::::<><><>0<>0<>b2a66c2690b16e1dd0a45181d81d4669<>res://.godot/imported/bombardier.png-a50d513503b222a5efd5fd0e59ca7d7f.ctex::
 bombardier.svg::CompressedTexture2D::7247132365161593677::1785200835::1785201004::1::::<><><>0<>0<>386c23c69c490cbc62112cf08bd82e86<>res://.godot/imported/bombardier.svg-b44c44a8e464dc7aadf096845f660f24.ctex::
@@ -32,6 +32,7 @@ mystic_archer.svg::CompressedTexture2D::3347333521530816162::1785200837::1785201
 mystic_archer_key.png::CompressedTexture2D::5196034590404978716::1785200751::1785201004::1::::<><><>0<>0<>f54099417d6d5fe2e6cff3896961dee7<>res://.godot/imported/mystic_archer_key.png-1a118d5090427144d50dc2ea114fa72b.ctex::
 pathcutter.svg::CompressedTexture2D::8609962409188809472::1785248041::1785248571::1::::<><><>0<>0<>77b9149e4e06ab5500b9c40c8ca67a4f<>res://.godot/imported/pathcutter.svg-be8985c358459747483cbb5c58cec567.ctex::
 pirate.svg::CompressedTexture2D::3361058319624023473::1785245633::1785246111::1::::<><><>0<>0<>d173d5510ce402472ef6d0bd51c7aa05<>res://.godot/imported/pirate.svg-b757e25d098aea05a5280724799ba91a.ctex::
+profile_default.svg::CompressedTexture2D::5465655899163141708::1785329898::1785333959::1::::<><><>0<>0<>25751b947e4525a0da48f62d8da567b6<>res://.godot/imported/profile_default.svg-6fc25cd392df2e945f2c9723e589a4c7.ctex::
 reef_medic.svg::CompressedTexture2D::6508252138229598948::1785236120::1785236169::1::::<><><>0<>0<>a52810ebf10cfdd0771b1fda12367360<>res://.godot/imported/reef_medic.svg-40eea4eb00b3736a3afb97fead75004e.ctex::
 tide_captain.svg::CompressedTexture2D::1036980251228338863::1785236121::1785236169::1::::<><><>0<>0<>8c51cc3e526bf677b6628f1299a43bb5<>res://.godot/imported/tide_captain.svg-e4c7076b49bb375c8d6aa8214f5310f5.ctex::
 ::res://assets/maps/::1785245531
@@ -44,8 +45,8 @@ boomerang.svg::CompressedTexture2D::6446661899332057263::1785242213::1785242226:
 ::res://export_templates/::1785187356
 ::res://feature_profiles/::1785187356
 ::res://scripts/::1785241106
-game_sound.gd::GDScript::2658819998818871204::1785293519::0::1::::GameSound<>Node<><>0<>0<><>::
-main.gd::GDScript::3190628593635555509::1785293736::0::1::::<>Node2D<><>0<>0<><>::
+game_sound.gd::GDScript::2658819998818871204::1785333880::0::1::::GameSound<>Node<><>0<>0<><>::
+main.gd::GDScript::3190628593635555509::1785333932::0::1::::<>Node2D<><>0<>0<><>::
 map_catalog.gd::GDScript::7564190244940966043::1785245337::0::1::::MapCatalog<>RefCounted<><>0<>0<><>::
 remote_prediction.gd::GDScript::6028864848802364766::1785242848::0::1::::RemotePrediction<>RefCounted<><>0<>0<><>::
 tower_catalog.gd::GDScript::8982837337347372000::1785262322::0::1::::TowerCatalog<>RefCounted<><>0<>0<><>::
