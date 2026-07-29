@@ -57,7 +57,7 @@ static func upgrade_branches(kind: int) -> Array:
 				{"name":"Dardos perforantes", "description":"Atraviesa hasta 2 globos.", "cost":300, "pierce":2},
 				{"name":"El dardo más grande", "description":"+1 daño, tamaño mayor y atraviesa 7 globos.", "cost":1950, "damage":1, "pierce":7, "dart_scale":1.8},
 				{"name":"El GRAN dardo", "description":"Habilidad: dardo gigante de 5 daño cada 40 s.", "cost":2300, "giant_ability":true, "ability_cooldown":40.0},
-				{"name":"D.A.R.D.O.", "description":"Dardos gigantes normales; -50% ataque. Habilidad: +150% durante 5 s.", "cost":24000, "final":true, "dart_giant":true, "attack_rate_mult":0.5}
+				{"name":"D.A.R.D.O.", "description":"Ataque: GRAN dardo de 5 daño y 600 alcance. -50% ataque. Habilidad: +150% durante 5 s.", "cost":24000, "final":true, "dart_giant":true, "damage":2, "dart_scale":3.0, "projectile_range":340, "projectile_speed_mult":0.72, "attack_rate_mult":0.5}
 			]},
 			{"name":"Entrenamiento", "levels":[
 				{"name":"Entrenamiento de campo", "description":"Más alcance y visión térmica.", "cost":350, "range":25, "thermal_vision":true},
@@ -70,7 +70,7 @@ static func upgrade_branches(kind: int) -> Array:
 				{"name":"Dardos pirotecnia", "description":"Daño físico y mágico; quemadura de 2 s.", "cost":750, "fire":true},
 				{"name":"División de dardo", "description":"Al impactar se divide en 2 dardos.", "cost":600, "split":2},
 				{"name":"Mitosis dardil", "description":"Primera división en 5; las hijas se dividen una vez más.", "cost":1750, "split":5, "child_split":2},
-				{"name":"Control remoto", "description":"Las divisiones se guían al globo cercano tras 1,2 s.", "cost":1400, "homing":true},
+				{"name":"Control remoto", "description":"Las divisiones se guían al globo cercano tras 0,2 s.", "cost":1400, "homing":true},
 				{"name":"Reino de los dardos", "description":"18 divisiones circulares dobles; hijas +50% daño.", "cost":43000, "final":true, "split":18, "kingdom":true}
 			]}
 		]

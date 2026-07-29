@@ -828,7 +828,7 @@ func update_projectiles(delta: float) -> void:
 	for i in range(projectiles.size() - 1, -1, -1):
 		var p := projectiles[i]
 		var previous_position: Vector2 = p.position
-		if p.kind == 4 or p.kind == 1 or int(p.get("pierce", 0)) > 0:
+		if p.kind == 4 or p.kind == 1 or int(p.get("pierce", 0)) > 0 or p.get("free_flying", false):
 			if p.kind == 1:
 				var angular_step: float = p.speed / p.circle_radius * delta
 				p.circle_angle += angular_step
@@ -836,7 +836,7 @@ func update_projectiles(delta: float) -> void:
 				p.position = p.circle_center + Vector2(cos(p.circle_angle), sin(p.circle_angle)) * p.circle_radius
 			else:
 				p.age = float(p.get("age", 0.0)) + delta
-				if p.get("homing", false) and float(p.age) >= 1.2:
+				if p.get("homing", false) and float(p.age) >= 0.2:
 					var homing_target := closest_balloon_to(p.position)
 					if homing_target >= 0:
 						p.direction = (point_on_path(balloons[homing_target].distance) - p.position).normalized()
@@ -853,6 +853,13 @@ func update_projectiles(delta: float) -> void:
 						if j >= balloons.size():
 							continue
 					damage_balloon(j, p.damage, str(p.get("damage_type", "physical")), int(p.get("owner", -1)))
+					if int(p.get("split", 0)) > 0:
+						spawn_dart_divisions(p, p.position)
+						p.remaining = 0.0
+						break
+					if p.get("free_flying", false) and int(p.get("pierce", 0)) <= 0:
+						p.remaining = 0.0
+						break
 			if int(p.get("pierce", 0)) > 0 and p.hit_ids.size() > int(p.get("pierce", 0)):
 				projectiles.remove_at(i)
 				continue
@@ -913,6 +920,7 @@ func spawn_dart_divisions(parent: Dictionary, origin: Vector2) -> void:
 		projectile.id = next_projectile_id
 		projectile.position = origin
 		projectile.target = -1
+		projectile.free_flying = true
 		projectile.direction = Vector2(parent.get("direction", Vector2.RIGHT)).rotated(angle)
 		projectile.remaining = float(parent.get("remaining", 260.0)) * 0.72
 		projectile.hit_ids = []
@@ -1308,6 +1316,14 @@ func _input(event: InputEvent) -> void:
 			if inspected_tower_index >= 0:
 				var menu_offset := inspected_menu_offset()
 				var inspected_type: int = int(towers[inspected_tower_index].type) if inspected_tower_index < towers.size() else -1
+				var source_count: int = int(towers[inspected_tower_index].get("sources", 1)) if inspected_type == 0 else 1
+				if source_count >= 2:
+					for source in range(source_count):
+						var source_rect := dart_source_priority_rect(source)
+						if source_rect.has_point(mouse):
+							var direction := -1 if mouse.x < source_rect.get_center().x else 1
+							change_inspected_source_target_mode(source, direction)
+							return
 				var can_choose_target := inspected_type != 5 and inspected_type != 6 and inspected_type != 8
 				if can_choose_target and Rect2(Vector2(1195, 840) + menu_offset, Vector2(42, 36)).has_point(mouse):
 					change_inspected_target_mode(-1)
@@ -1759,6 +1775,22 @@ func change_inspected_target_mode(direction: int) -> void:
 	if inspected_tower_index < 0 or inspected_tower_index >= towers.size():
 		return
 	towers[inspected_tower_index].target_mode = posmod(int(towers[inspected_tower_index].get("target_mode", 0)) + direction, 4)
+	game_sound.play_effect("click", -12.0)
+
+func dart_source_priority_rect(source: int) -> Rect2:
+	return Rect2(Vector2(970, 550 + source * 38) + inspected_menu_offset(), Vector2(500, 32))
+
+func change_inspected_source_target_mode(source: int, direction: int) -> void:
+	if inspected_tower_index < 0 or inspected_tower_index >= towers.size():
+		return
+	var tower: Dictionary = towers[inspected_tower_index]
+	var modes: Array = tower.get("target_modes", [0, 0, 0, 0, 0]).duplicate()
+	while modes.size() < 5:
+		modes.append(0)
+	if source < 0 or source >= modes.size():
+		return
+	modes[source] = posmod(int(modes[source]) + direction, 4)
+	tower.target_modes = modes
 	game_sound.play_effect("click", -12.0)
 
 func send_balloon_to_rival(option_index: int) -> void:
@@ -3969,6 +4001,19 @@ func draw_inspected_tower_menu() -> void:
 		timing_label = "Generación"
 	var timing_rate: float = float(tower.get("action_rate", 1.0 / float(tower.get("reload", 1.0)) if float(tower.get("reload", 0.0)) > 0.0 else 0.0))
 	draw_string(font, Vector2(1100, 842) + menu_offset, "%s · Alcance %d · %s %.2f/s" % [primary_stat, tower.range, timing_label, timing_rate], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("bdd1de"))
+	var dart_sources: int = int(tower.get("sources", 1)) if kind == 0 else 1
+	if dart_sources >= 2:
+		var source_modes: Array = tower.get("target_modes", [0, 0, 0, 0, 0])
+		var source_target_names := ["PRIMERO", "ÚLTIMO", "MÁS FUERTE", "MÁS DÉBIL"]
+		for source in range(dart_sources):
+			var rect := dart_source_priority_rect(source)
+			var mode: int = int(source_modes[source]) if source < source_modes.size() else 0
+			var source_name := "FUENTE MISIL" if dart_sources >= 5 and source == 4 else "FUENTE %d" % (source + 1)
+			draw_style_box(make_box(Color("243e52"), 7), rect)
+			draw_string(font, rect.position + Vector2(12, 22), "‹", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color.WHITE)
+			draw_string(font, rect.position + Vector2(48, 21), source_name, HORIZONTAL_ALIGNMENT_LEFT, 135, 14, Color("8ce1f1"))
+			draw_centered(source_target_names[mode], rect.get_center() + Vector2(58, 5), 14, Color("f4d66d"))
+			draw_string(font, rect.end - Vector2(26, 10), "›", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color.WHITE)
 	if kind != 5 and kind != 6 and kind != 8:
 		var target_modes := ["PRIMERO", "ÚLTIMO", "MÁS FUERTE", "MÁS DÉBIL"]
 		var target_mode: int = int(tower.get("target_mode", 0))
@@ -4051,8 +4096,15 @@ func draw_placement_preview() -> void:
 	var is_valid := can_place_tower(preview_position, placement_tower)
 	var tint := Color(1.0, 1.0, 1.0, 0.55) if is_valid else Color(1.0, 0.28, 0.28, 0.62)
 	var texture = tower_texture_for(placement_tower)
+	var preview_range: float = float(tower_config(placement_tower).range)
+	var preview_sources := 1
+	if placement_tower == 0 and inspected_tower_index >= 0 and inspected_tower_index < towers.size() and int(towers[inspected_tower_index].get("type", -1)) == 0:
+		preview_range = float(towers[inspected_tower_index].get("range", preview_range))
+		preview_sources = int(towers[inspected_tower_index].get("sources", 1))
 	draw_set_transform(local_arena_origin(), 0.0, local_arena_scale())
-	draw_circle(preview_position, tower_config(placement_tower).range, Color(0.35, 0.75, 1.0, 0.13) if is_valid else Color(1.0, 0.25, 0.25, 0.15))
+	var range_color := Color(0.35, 0.75, 1.0, 0.13) if is_valid else Color(1.0, 0.25, 0.25, 0.15)
+	for source in range(preview_sources):
+		draw_circle(preview_position + dart_source_offset(source, preview_sources), preview_range, range_color)
 	draw_texture_rect(texture, Rect2(preview_position - Vector2(34, 34), Vector2(68, 68)), false, tint)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
@@ -4061,8 +4113,11 @@ func draw_inspected_tower_highlight() -> void:
 		return
 	var tower: Dictionary = towers[inspected_tower_index]
 	draw_set_transform(local_arena_origin(), 0.0, local_arena_scale())
-	draw_circle(tower.position, tower.range, Color(0.68, 0.70, 0.75, 0.16))
-	draw_arc(tower.position, tower.range, 0.0, TAU, 48, Color(0.82, 0.85, 0.90, 0.58), 2.5)
+	var source_count: int = int(tower.get("sources", 1)) if int(tower.get("type", -1)) == 0 else 1
+	for source in range(source_count):
+		var source_position: Vector2 = tower.position + dart_source_offset(source, source_count)
+		draw_circle(source_position, tower.range, Color(0.68, 0.70, 0.75, 0.16))
+		draw_arc(source_position, tower.range, 0.0, TAU, 48, Color(0.82, 0.85, 0.90, 0.58), 2.5)
 	draw_arc(tower.position, 43.0, 0.0, TAU, 28, Color("f4d66d"), 3.0)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
